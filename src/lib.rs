@@ -21,3 +21,4 @@ pub mod index;
 pub mod io;
 pub mod l2bit;
 pub mod opt;
+pub mod seed;

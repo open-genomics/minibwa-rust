@@ -31,7 +31,7 @@ pub fn build(fasta: &str, prefix: &str, seed: u64, sa_bit: u32, threads: usize) 
 }
 
 /// libsais 构建 BWT + 采样 SA（对应 `mb_bwt_libsais`）。
-fn bwt_libsais(l2b: &L2b, sa_bit: u32, both_strand: bool, threads: usize) -> Result<Bwt> {
+pub(crate) fn bwt_libsais(l2b: &L2b, sa_bit: u32, both_strand: bool, threads: usize) -> Result<Bwt> {
     let len = if both_strand { l2b.tot_len * 2 } else { l2b.tot_len };
     let use_int32 = len + (FS as u64) < (i32::MAX as u64);
 
@@ -131,4 +131,18 @@ fn sa_to_bwt_i64(a: &mut [i64], seq: &mut [u8], len: u64, sa_bit: u32, ssa: &mut
         seq[i] = a[i + 1] as u8;
     }
     primary
+}
+
+/// 索引加载（对应 `mb_idx_load` 的非 meth 路径）。
+pub struct Idx {
+    pub l2b: L2b,
+    pub bwt: Bwt,
+}
+
+impl Idx {
+    pub fn load(prefix: &str) -> Result<Idx> {
+        let l2b = L2b::load(format!("{prefix}.l2b"))?;
+        let bwt = Bwt::load(format!("{prefix}.mbw"))?;
+        Ok(Idx { l2b, bwt })
+    }
 }

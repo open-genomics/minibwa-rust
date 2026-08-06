@@ -62,8 +62,86 @@ enum Commands {
         reads1: String,
         reads2: Option<String>,
     },
+    /// 调试：输出 SMEM 种子区间（与 C 版 fastmap 单序列模式一致）
+    Fastmap {
+        /// 索引前缀（<prefix>.l2b / <prefix>.mbw）
+        prefix: String,
+        /// reads FASTA/FASTQ（支持 .gz）
+        reads: String,
+        /// 最小种子长度
+        #[arg(short = 'l', default_value_t = 19)]
+        min_len: i32,
+        /// 最小区间大小
+        #[arg(short = 's', default_value_t = 1)]
+        min_occ: i32,
+        /// 输出坐标的最大区间大小
+        #[arg(short = 'w', default_value_t = 20)]
+        max_size_out: u64,
+    },
     /// 打印版本号
     Version,
+}
+
+fn run_fastmap(
+    prefix: &str,
+    reads: &str,
+    min_len: i32,
+    min_occ: i32,
+    max_size_out: u64,
+) -> Result<()> {
+    use minibwa_rust::bwt::Sai;
+    use minibwa_rust::dna::NT4;
+    use minibwa_rust::index::Idx;
+    use minibwa_rust::io::kseq::SeqIter;
+    use minibwa_rust::l2bit::open_fasta;
+    use std::io::Write;
+
+    let idx = Idx::load(prefix)?;
+    let reader = open_fasta(reads)?;
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+
+    for rec in SeqIter::new(reader) {
+        let rec = rec?;
+        let seq: Vec<u8> = rec.seq.iter().map(|&b| NT4[b as usize]).collect();
+        writeln!(out, "SQ\t{}\t{}", rec.name, seq.len())?;
+        // 与 C 版一致：fastmap 不建 kmer 缓存，直接走标准 SMEM
+        let mut p = Sai::default();
+        let mut x = 0i64;
+        let mut intervals = Vec::new();
+        while {
+            x = idx.bwt.smem(&seq, x, min_len as i64, min_occ as i64, &mut p);
+            if p.size > 0 {
+                intervals.push(p);
+            }
+            x < seq.len() as i64
+        } {}
+        for p in &intervals {
+            let st = p.info >> 32;
+            let en = p.info & 0xffff_ffff;
+            write!(out, "EM\t{st}\t{en}\t{}", p.size)?;
+            let len = en - st;
+            if p.size <= max_size_out {
+                for row in p.x[0]..p.x[0] + p.size {
+                    let sa = idx.bwt.sa(row);
+                    let mut rev = false;
+                    let (tid, cst) = idx.l2b.intv2cid(sa, sa + len, &mut rev);
+                    if tid < 0 {
+                        write!(out, "\t.")?;
+                    } else {
+                        let strand = if rev { '-' } else { '+' };
+                        write!(out, "\t{}:{}{}", idx.l2b.ctg[tid as usize].name, strand, cst + 1)?;
+                    }
+                }
+            } else {
+                write!(out, "\t*")?;
+            }
+            writeln!(out)?;
+        }
+        writeln!(out, "//")?;
+    }
+    out.flush()?;
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -80,6 +158,13 @@ fn main() -> Result<()> {
             minibwa_rust::index::build(&fasta, &prefix, seed, sa_bit, threads)
         }
         Commands::Getref { l2b } => minibwa_rust::l2bit::getref(&l2b),
+        Commands::Fastmap {
+            prefix,
+            reads,
+            min_len,
+            min_occ,
+            max_size_out,
+        } => run_fastmap(&prefix, &reads, min_len, min_occ, max_size_out),
         Commands::Map { .. } | Commands::Mem { .. } => {
             eprintln!("ERROR: map 子命令尚未实现（将在 M5/M6 里程碑交付）");
             std::process::exit(1);

@@ -134,3 +134,35 @@ fn rust_loads_c_index_chrm() {
         "chrM .mbw 不一致"
     );
 }
+
+#[test]
+fn fastmap_parity() {
+    // 种子级对照：C/Rust 的 fastmap 输出必须逐字节一致
+    let Some(c) = c_minibwa() else { return };
+    let mb_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test");
+    let reads = mb_dir.join("chrM-read_1.fa.gz");
+    if !reads.exists() {
+        eprintln!("跳过：缺少 {}", reads.display());
+        return;
+    }
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-fastmap");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut cc = Command::new(&c);
+    cc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("c"));
+    run(&mut cc);
+    let mut rc = Command::new(rust_bin());
+    rc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("r"));
+    run(&mut rc);
+
+    for args in [&["-l", "19", "-s", "1", "-w", "20"][..], &["-l", "15", "-s", "2", "-w", "5"][..]] {
+        let c_out = Command::new(&c)
+            .arg("fastmap").args(args).arg(dir.join("c")).arg(&reads)
+            .output().unwrap();
+        let r_out = Command::new(rust_bin())
+            .arg("fastmap").args(args).arg(dir.join("r")).arg(&reads)
+            .output().unwrap();
+        assert!(c_out.status.success() && r_out.status.success());
+        assert_eq!(c_out.stdout, r_out.stdout, "fastmap 输出不一致 (args={args:?})");
+    }
+}
