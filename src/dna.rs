@@ -124,3 +124,45 @@ mod tests {
         assert_eq!(&s, b"NACGT");
     }
 }
+
+/// 64-bit 混合哈希（对应 `mb_hash64`）。
+pub fn hash64(mut x: u64) -> u64 {
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xbf58476d1ce4e5b9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94d049bb133111eb);
+    x ^ (x >> 31)
+}
+
+/// FNV-1a 字符串哈希（对应 `mb_hash_str`）。
+pub fn hash_str(s: &[u8]) -> u32 {
+    let mut h = 2166136261u32;
+    for &b in s {
+        h ^= b as u32;
+        h = h.wrapping_mul(16777619);
+    }
+    h
+}
+
+/// 快速 log2 近似（对应 `mb_log2`，来自 minimap2；仅适用于 x ≥ 2）。
+pub fn log2_approx(x: f32) -> f32 {
+    let mut i = x.to_bits();
+    let log_2 = (((i >> 23) & 255).wrapping_sub(128)) as f32;
+    i &= !(255u32 << 23);
+    i = i.wrapping_add(127u32 << 23);
+    let f = f32::from_bits(i);
+    log_2 + (-0.34484843 * f + 2.024_665_8) * f - 0.674_877_6
+}
+
+#[cfg(test)]
+mod hash_tests {
+    use super::*;
+
+    #[test]
+    fn log2_approx_values() {
+        // 与 C 版 mb_log2 的若干参考值对照
+        assert!((log2_approx(2.0) - 1.0).abs() < 0.05);
+        assert!((log2_approx(8.0) - 3.0).abs() < 0.05);
+        assert!((log2_approx(1024.0) - 10.0).abs() < 0.05);
+    }
+}

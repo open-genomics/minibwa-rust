@@ -166,3 +166,47 @@ fn fastmap_parity() {
         assert_eq!(c_out.stdout, r_out.stdout, "fastmap 输出不一致 (args={args:?})");
     }
 }
+
+#[test]
+fn chain_only_paf_parity() {
+    // 链级对照：--chain-only PAF 输出必须逐字节一致（覆盖链化/hit/mapQ）
+    let Some(c) = c_minibwa() else { return };
+    let mb_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test");
+    let reads = mb_dir.join("chrM-read_2.fa.gz");
+    if !reads.exists() {
+        eprintln!("跳过：缺少 {}", reads.display());
+        return;
+    }
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-chain");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut cc = Command::new(&c);
+    cc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("c"));
+    run(&mut cc);
+    let mut rc = Command::new(rust_bin());
+    rc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("r"));
+    run(&mut rc);
+
+    let cases: &[&[&str]] = &[
+        &[],
+        &["-x", "lr"],
+        &["-x", "sr"],
+        &["-k", "15", "-w", "50"],
+        &["-m", "10", "-p", "0.3", "-N", "10"],
+        &["-g", "500", "-W", "5000", "--outs", "0.5"],
+        &["-x", "lr", "--outn", "3"],
+        &["-m", "10", "-p", "0.3", "-N", "10", "-5"],
+    ];
+    for args in cases {
+        let c_out = Command::new(&c)
+            .arg("map").arg("--chain-only").arg("-t1").args(*args)
+            .arg(dir.join("c")).arg(&reads)
+            .output().unwrap();
+        let r_out = Command::new(rust_bin())
+            .arg("map").arg("--chain-only").arg("-t1").args(*args)
+            .arg(dir.join("r")).arg(&reads)
+            .output().unwrap();
+        assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
+        assert_eq!(c_out.stdout, r_out.stdout, "chain-only PAF 不一致 (args={args:?})");
+    }
+}

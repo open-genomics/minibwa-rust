@@ -21,4 +21,8 @@ pub mod index;
 pub mod io;
 pub mod l2bit;
 pub mod opt;
+pub mod chain;
+pub mod format;
+pub mod mapcore;
+pub mod hits;
 pub mod seed;
