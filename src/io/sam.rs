@@ -136,11 +136,11 @@ pub fn format_record_with_optional_tags(
 /// # Example
 /// ```
 /// // Perfect match: all bases align
-/// let md = bwa_rust::io::sam::generate_md_tag(b"ACGTACGT", b"ACGTACGT", "8M");
+/// let md = minibwa_rust::io::sam::generate_md_tag(b"ACGTACGT", b"ACGTACGT", "8M");
 /// assert_eq!(md, "8");
 ///
 /// // One mismatch: ref A at pos 4, query T
-/// let md = bwa_rust::io::sam::generate_md_tag(b"ACGTACGT", b"ACGTTCGT", "8M");
+/// let md = minibwa_rust::io::sam::generate_md_tag(b"ACGTACGT", b"ACGTTCGT", "8M");
 /// assert_eq!(md, "4A3");
 /// ```
 pub fn generate_md_tag(reference: &[u8], query: &[u8], cigar: &str) -> String {

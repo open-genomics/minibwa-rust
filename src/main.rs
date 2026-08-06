@@ -1,4 +1,4 @@
-// jemalloc：替换默认分配器，补回 musl malloc 性能，多线程 rayon 场景显著提升
+// jemalloc：替换默认分配器，多线程场景显著提升
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -9,15 +9,14 @@ static GLOBAL: Jemalloc = Jemalloc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use bwa_rust::align;
-use bwa_rust::index;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "bwa-rust",
+    name = "minibwa-rust",
     author,
     version,
-    about = "Rust implementation inspired by BWA",
+    about = "minibwa 的 Rust 重写：BWT 索引 + 变长种子 + minimap2 风格链化与比对",
     arg_required_else_help = true
 )]
 struct Cli {
@@ -27,173 +26,67 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Build an FM index from a reference FASTA
+    /// 为参考基因组 FASTA 建索引（生成 <prefix>.l2b 与 <prefix>.mbw）
     Index {
-        /// Reference FASTA file
-        reference: String,
-        /// Output prefix for the generated .fm index
-        #[arg(short, long, default_value = "ref")]
-        output: String,
-    },
-    /// Align reads in FASTQ against an existing FM index
-    Align {
-        /// Path to FM index (.fm)
-        #[arg(short = 'i', long = "index")]
-        index: String,
-        /// Reads FASTQ file
-        reads: String,
-        /// Output SAM path (stdout if omitted)
-        #[arg(short, long)]
-        out: Option<String>,
-        /// Minimum seed length
-        #[arg(short = 'k', long = "min-seed-len", default_value_t = align::AlignOpt::default().min_seed_len)]
-        min_seed_len: usize,
-        /// Number of threads
-        #[arg(short = 't', long = "threads", value_parser = parse_threads, default_value_t = align::AlignOpt::default().threads)]
+        /// 参考基因组 FASTA（支持 .gz）
+        fasta: String,
+        /// 输出前缀（默认与输入文件相同）
+        prefix: Option<String>,
+        /// 模糊碱基随机种子
+        #[arg(short = 's', long = "seed", default_value_t = 11u64)]
+        seed: u64,
+        /// SA 采样率 1/(1<<INT)
+        #[arg(short = 'u', long = "sa-sample", default_value_t = 4u32)]
+        sa_bit: u32,
+        /// 线程数
+        #[arg(short = 't', long = "threads", default_value_t = 4usize)]
         threads: usize,
     },
-    /// BWA-MEM style alignment: build index from FASTA and align FASTQ in one step
+    /// 从 .l2b 还原参考基因组序列（调试用，与 C 版 getref 一致）
+    Getref {
+        /// .l2b 文件路径
+        l2b: String,
+    },
+    /// 比对 reads（SAM/PAF 输出）
+    Map {
+        /// 索引前缀（<prefix>.l2b / <prefix>.mbw）或直接给参考 FASTA
+        reference: String,
+        /// reads FASTA/FASTQ（支持 .gz）
+        reads1: String,
+        /// 第二端 reads（可选）
+        reads2: Option<String>,
+    },
+    /// 兼容 bwa-mem 的旧式命令行（不推荐）
     Mem {
-        /// Reference FASTA file
         reference: String,
-        /// Reads FASTQ file
-        reads: String,
-        /// Output SAM path (stdout if omitted)
-        #[arg(short, long)]
-        out: Option<String>,
-        /// Minimum seed length
-        #[arg(short = 'k', long = "min-seed-len", default_value_t = align::AlignOpt::default().min_seed_len)]
-        min_seed_len: usize,
-        /// Number of threads
-        #[arg(short = 't', long = "threads", value_parser = parse_threads, default_value_t = align::AlignOpt::default().threads)]
-        threads: usize,
+        reads1: String,
+        reads2: Option<String>,
     },
-}
-
-fn parse_threads(s: &str) -> std::result::Result<usize, String> {
-    let threads: usize = s.parse().map_err(|_| "threads must be a positive integer".to_string())?;
-    if threads == 0 {
-        return Err("threads must be >= 1".to_string());
-    }
-    Ok(threads)
-}
-
-fn build_align_opt(min_seed_len: usize, threads: usize) -> align::AlignOpt {
-    let opt = align::AlignOpt {
-        min_seed_len,
-        threads,
-        ..align::AlignOpt::default()
-    };
-    if let Err(e) = opt.validate() {
-        eprintln!("Error: invalid alignment parameters: {}", e);
-        std::process::exit(1);
-    }
-    opt
+    /// 打印版本号
+    Version,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Index { reference, output } => run_index(&reference, &output),
-        Commands::Align {
-            index,
-            reads,
-            out,
-            min_seed_len,
+        Commands::Index {
+            fasta,
+            prefix,
+            seed,
+            sa_bit,
             threads,
         } => {
-            let opt = build_align_opt(min_seed_len, threads);
-            run_align(&index, &reads, out.as_deref(), opt)
+            let prefix = prefix.unwrap_or_else(|| fasta.clone());
+            minibwa_rust::index::build(&fasta, &prefix, seed, sa_bit, threads)
         }
-        Commands::Mem {
-            reference,
-            reads,
-            out,
-            min_seed_len,
-            threads,
-        } => {
-            let opt = build_align_opt(min_seed_len, threads);
-            run_mem(&reference, &reads, out.as_deref(), opt)
+        Commands::Getref { l2b } => minibwa_rust::l2bit::getref(&l2b),
+        Commands::Map { .. } | Commands::Mem { .. } => {
+            eprintln!("ERROR: map 子命令尚未实现（将在 M5/M6 里程碑交付）");
+            std::process::exit(1);
         }
-    }
-}
-
-fn run_index(reference: &str, output: &str) -> Result<()> {
-    let mut result = index::builder::build_fm_from_fasta(reference, 512)?;
-
-    println!("reference: {}", reference);
-    println!("sequences: {}", result.n_seqs);
-    println!("total_len: {}", result.total_len);
-
-    result.fm.set_meta(index::fm::IndexMeta {
-        reference_file: Some(reference.to_string()),
-        build_args: Some(std::env::args().collect::<Vec<_>>().join(" ")),
-        build_timestamp: Some(chrono::Utc::now().to_rfc3339()),
-    });
-
-    let out_path = format!("{}.fm", output);
-    result
-        .fm
-        .save_to_file(&out_path)
-        .map_err(|e| anyhow::anyhow!("cannot write index to '{}': {}", out_path, e))?;
-    println!("FM index saved: {}", out_path);
-    Ok(())
-}
-
-fn run_align(index_path: &str, reads_path: &str, out_path: Option<&str>, opt: align::AlignOpt) -> Result<()> {
-    align::align_fastq_with_opt(index_path, reads_path, out_path, opt)
-}
-
-fn run_mem(reference: &str, reads_path: &str, out_path: Option<&str>, opt: align::AlignOpt) -> Result<()> {
-    eprintln!("[bwa-rust mem] Loading reference: {}", reference);
-
-    let result = index::builder::build_fm_from_fasta(reference, 512)?;
-
-    eprintln!(
-        "[bwa-rust mem] {} sequences, {} bp total",
-        result.n_seqs, result.total_len
-    );
-    eprintln!("[bwa-rust mem] FM index built");
-
-    let fm = std::sync::Arc::new(result.fm);
-
-    eprintln!("[bwa-rust mem] Aligning reads from: {}", reads_path);
-    align::align_fastq_with_fm_opt(fm, reads_path, out_path, opt)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn align_defaults_match_align_opt_default() {
-        let cli = Cli::try_parse_from(["bwa-rust", "align", "-i", "ref.fm", "reads.fq"]).unwrap();
-        let defaults = align::AlignOpt::default();
-
-        let Commands::Align {
-            min_seed_len, threads, ..
-        } = cli.command
-        else {
-            panic!("expected align command");
-        };
-
-        assert_eq!(min_seed_len, defaults.min_seed_len);
-        assert_eq!(threads, defaults.threads);
-    }
-
-    #[test]
-    fn mem_defaults_match_align_opt_default() {
-        let cli = Cli::try_parse_from(["bwa-rust", "mem", "ref.fa", "reads.fq"]).unwrap();
-        let defaults = align::AlignOpt::default();
-
-        let Commands::Mem {
-            min_seed_len, threads, ..
-        } = cli.command
-        else {
-            panic!("expected mem command");
-        };
-
-        assert_eq!(min_seed_len, defaults.min_seed_len);
-        assert_eq!(threads, defaults.threads);
+        Commands::Version => {
+            println!("{VERSION}");
+            Ok(())
+        }
     }
 }

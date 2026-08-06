@@ -1,73 +1,23 @@
-//! # bwa-rust
+//! # minibwa-rust
 //!
-//! 受 [BWA](https://github.com/lh3/bwa) 启发的 Rust 版序列比对器。
+//! [minibwa](https://github.com/lh3/minibwa) 的 Rust 重写。
 //!
-//! 本 crate 提供了基于 FM 索引的 DNA 序列比对功能，包括：
-//!
-//! - **索引构建**：从 FASTA 参考序列构建 FM 索引（后缀数组 + BWT）
-//! - **种子查找**：SMEM（超级最大精确匹配）种子搜索
-//! - **序列比对**：带状仿射间隙 Smith-Waterman 局部对齐
-//! - **链构建**：种子链构建与过滤
-//!
-//! ## 快速示例
-//!
-//! ```rust,no_run
-//! use bwa_rust::index::{sa, bwt, fm};
-//! use bwa_rust::util::dna;
-//!
-//! // 构建 FM 索引
-//! let reference = b"ACGTACGTAGCTGATCGTAG";
-//! let norm = dna::normalize_seq(reference);
-//! let mut text: Vec<u8> = norm.iter().map(|&b| dna::to_alphabet(b)).collect();
-//! let len = text.len() as u32;
-//! let contigs = vec![fm::Contig { name: "ref".to_string(), len, offset: 0 }];
-//! text.push(0);
-//!
-//! let sa_arr = sa::build_sa(&text);
-//! let bwt_arr = bwt::build_bwt(&text, &sa_arr);
-//! let fm_idx = fm::FMIndex::build(text, bwt_arr, sa_arr, contigs, dna::SIGMA as u8, 16);
-//!
-//! // 精确匹配搜索
-//! let pattern: Vec<u8> = b"GCTGATC".iter().map(|&b| dna::to_alphabet(b)).collect();
-//! if let Some((l, r)) = fm_idx.backward_search(&pattern) {
-//!     let positions = fm_idx.sa_interval_positions(l, r);
-//!     println!("Found {} occurrences", positions.len());
-//! }
-//! ```
+//! minibwa 是 bwa-mem 的继任者：用 BWT 索引基因组、像 bwa-mem 一样查找
+//! 变长种子（SMEM），再使用 minimap2 的链化与 SIMD 比对算法。
+//! 本项目追求与 C 版 minibwa 的索引文件（`.l2b` / `.mbw`）字节级兼容。
 //!
 //! ## 模块说明
 //!
-//! - [`io`] — FASTA / FASTQ 文件解析
-//! - [`index`] — FM 索引构建（后缀数组、BWT、FM 索引）
-//! - [`align`] — 序列比对算法（SMEM 种子、链构建、Smith-Waterman）
-//! - [`util`] — DNA 编码 / 解码 / 反向互补等工具函数
+//! - [`dna`] — DNA 编码表、反向互补、splitmix64 随机数
+//! - [`opt`] — 比对参数（对应 C 版 `mb_opt_t`），含 sr/lr/adap 预设
+//! - [`io`] — FASTA / FASTQ 解析
+//! - [`l2bit`] — l2bit 参考基因组格式（`.l2b`）
+//! - [`bwt`] — BWT + 采样后缀数组（`.mbw`），Rank / SMEM / SA 查询
+//! - [`index`] — 索引构建（FASTA → `.l2b` + `.mbw`）
 
-pub mod align;
-pub mod error;
+pub mod bwt;
+pub mod dna;
 pub mod index;
 pub mod io;
-pub mod util;
-
-/// 测试共用的辅助函数
-#[cfg(test)]
-pub(crate) mod testutil {
-    use crate::index::fm::{Contig, FMIndex};
-    use crate::index::{bwt, sa};
-    use crate::util::dna;
-
-    /// 从 ASCII 序列构建单 contig FM 索引（仅用于测试）
-    pub fn build_test_fm(seq: &[u8]) -> FMIndex {
-        let norm = dna::normalize_seq(seq);
-        let mut text: Vec<u8> = norm.iter().map(|&b| dna::to_alphabet(b)).collect();
-        let len = text.len() as u32;
-        let contigs = vec![Contig {
-            name: "chr1".to_string(),
-            len,
-            offset: 0,
-        }];
-        text.push(0);
-        let sa_arr = sa::build_sa(&text);
-        let bwt_arr = bwt::build_bwt(&text, &sa_arr);
-        FMIndex::build(text, bwt_arr, sa_arr, contigs, dna::SIGMA as u8, 4)
-    }
-}
+pub mod l2bit;
+pub mod opt;

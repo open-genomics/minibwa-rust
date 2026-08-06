@@ -1,92 +1,72 @@
-# bwa-rust
+# minibwa-rust
 
-[![CI](https://github.com/AICL-Lab/bwa-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/AICL-Lab/bwa-rust/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/AICL-Lab/bwa-rust?color=blue)](https://github.com/AICL-Lab/bwa-rust/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](Cargo.toml)
+[minibwa](https://github.com/lh3/minibwa) 的 Rust 重写。minibwa 是 bwa-mem 的继任者：
+用 BWT 索引基因组、查找变长种子（SMEM），再以 minimap2 风格的链化与 DP 比对完成短读映射，
+比 bwa-mem 快 3 倍以上、比 bwa-mem2 快 2 倍，精度相当。
 
-用 Rust 实现的内存安全 BWA-MEM 风格单端 DNA 短读比对器。
+本项目目标：
 
-## 已交付能力
+- 索引文件与 C 版 minibwa **字节级兼容**（`.l2b` 参考序列 + `.mbw` BWT/采样 SA）
+- 算法逐模块对照移植，以 C 版输出为基准做一致性验证
+- 纯 Rust 实现（后缀数组构建使用 libsais 的纯 Rust 移植 `libsais-rs`），无 C 依赖
 
-| 领域 | 状态 | 说明 |
-|------|------|------|
-| FASTA 参考序列 | 已交付 | 支持多 contig，并归一化到项目字母表。 |
-| FASTQ 单端 reads | 已交付 | 单端 reads 是当前稳定范围。 |
-| FM-index | 已交付 | 后缀数组 + BWT + Occ 采样，序列化为单一 `.fm` 文件。 |
-| BWA-MEM 风格比对 | 已交付 | SMEM 种子、种子链、带状 Smith-Waterman 延伸。 |
-| SAM 输出 | 已交付 | header、CIGAR、MAPQ、AS/XS/NM、可用时输出 MD:Z 与 SA:Z。 |
-| 并行比对 | 已交付 | 基于 rayon 的 read 级并行。 |
+## 当前状态
 
-如需生产级配对端流程、精确 BWA 行为兼容或成熟 BAM/CRAM 工作流，请优先使用原版 BWA。
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| M1 | 仓库骨架：CLI、参数体系（`mb_opt_t`）、DNA 工具 | ✅ |
+| M2 | l2bit + BWT + 索引构建（`index` / `getref`） | 进行中 |
+| M3 | 两轮 SMEM 种子 + kmer 缓存 | 未开始 |
+| M4 | 链化 + hit 处理 + mapQ | 未开始 |
+| M5 | ksw2 风格比对 + CIGAR + SAM/PAF（单端一致） | 未开始 |
+| M6 | 配对端：insert size 统计、配对、rescue | 未开始 |
+| M7 | 自适应参数全量、对比脚本、CI、文档 | 未开始 |
 
-## 安装
+在 M5 完成前，本项目**不能用于比对**；生产环境请使用
+[C 版 minibwa](https://github.com/lh3/minibwa)。
 
-从 [GitHub Releases](https://github.com/AICL-Lab/bwa-rust/releases) 下载对应平台产物：
-
-| 平台 | 产物 |
-|------|------|
-| Linux 静态链接 | `bwa-rust-linux-amd64-static.tar.gz` |
-| Linux glibc | `bwa-rust-linux-amd64.tar.gz` |
-| macOS Intel | `bwa-rust-macos-amd64.tar.gz` |
-| macOS Apple Silicon | `bwa-rust-macos-arm64.tar.gz` |
-| Windows | `bwa-rust-windows-amd64.zip` |
-
-从源码构建：
+## 构建与使用
 
 ```bash
-git clone https://github.com/AICL-Lab/bwa-rust.git
-cd bwa-rust
 cargo build --release
+
+# 建索引（与 C 版 minibwa index 兼容）
+minibwa-rust index ref.fa prefix        # 生成 prefix.l2b + prefix.mbw
+
+# 从 .l2b 还原参考序列（调试）
+minibwa-rust getref prefix.l2b
+
+# 比对（M5 之后可用）
+minibwa-rust map prefix read1.fq read2.fq > aln.sam
 ```
-
-## 快速开始
-
-```bash
-# 构建单文件 FM-index
-bwa-rust index reference.fa -o ref
-
-# 使用预构建索引比对单端 reads
-bwa-rust align -i ref.fm reads.fq -o output.sam
-
-# 内存中构建索引并一步比对
-bwa-rust mem reference.fa reads.fq -t 4 -o output.sam
-```
-
-默认比对参数以 `src/align/mod.rs` 的 `AlignOpt::default()` 为准：
-
-| 参数 | 默认值 |
-|------|--------|
-| match / mismatch | `2 / 1` |
-| gap open / extend | `2 / 1` |
-| band width | `16` |
-| score threshold | `20` |
-| min seed length | `19` |
-| max seed occurrences | `500` |
-| max chains / alignments | `5 / 5` |
-| z-drop | `100` |
 
 ## 架构
 
 ```text
-FASTA/FASTQ -> FM-index -> SMEM seeds -> chains -> Smith-Waterman -> SAM
+FASTA ──> l2bit(.l2b) ──> libsais SA ──> BWT + 采样 SA(.mbw)
+                                              │
+reads ──> 两轮 SMEM 种子 ──> 链化 ──> ksw2 比对 ──> SAM/PAF
 ```
 
-关键模块：
+模块与 C 版对照：
 
-- `src/index/`：后缀数组、BWT、FM-index 序列化。
-- `src/align/`：种子、链、延伸、MAPQ、补充比对分类、流水线。
-- `src/io/`：FASTA、FASTQ、SAM 解析与格式化。
-- `src/util/dna.rs`：DNA 归一化、字母表映射、反向互补。
+| Rust 模块 | C 版文件 | 职责 |
+|-----------|----------|------|
+| `src/l2bit.rs` | l2bit.c | 2-bit 参考基因组格式读写 |
+| `src/bwt.rs` | bwt.c | BWT Rank/extend/SMEM、采样 SA |
+| `src/index.rs` | index.c | 索引构建流水线 |
+| `src/opt.rs` | options.c | 参数默认值、sr/lr/adap 预设 |
+| `src/dna.rs` | kommon.c（部分） | 编码表、splitmix64 |
 
-## 开发
+## 测试
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo test
 ```
 
-## 许可证
+索引字节级兼容性验证：先用 C 版 minibwa 对同一 FASTA 建索引，
+再与本项目输出逐字节比较（见 `tests/` 集成测试，M2 交付）。
 
-MIT。本项目受 Heng Li 的 [BWA](https://github.com/lh3/bwa) 启发。
+## 许可
+
+MIT

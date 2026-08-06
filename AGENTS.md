@@ -2,64 +2,29 @@
 
 ## Project Truth
 
-bwa-rust is a Rust 2021 library + CLI for BWA-MEM-style single-end DNA short-read alignment.
+minibwa-rust 是 C 版 [minibwa](https://github.com/lh3/minibwa)（bwa-mem 继任者）的 Rust 重写。
+参考 C 源码位于 `/home/shane/github/open-genomics/minibwa`（跟踪 upstream，勿改）。
 
-Pipeline: `FASTA/FASTQ -> FM-index -> SMEM seeds -> chains -> Smith-Waterman -> SAM`.
-
-Shipped scope:
-
-- FASTA reference input, FASTQ single-end reads, SAM output.
-- Single `.fm` index file built from suffix array + BWT + sampled Occ table.
-- SMEM seeding, seed chaining, banded SW extension, MAPQ, MD:Z and SA:Z tags.
-- Rayon read-level parallelism.
-
-Not shipped: paired-end CLI alignment, BAM/CRAM output, BWA index compatibility, exact BWA output compatibility.
+核心承诺：**索引文件（.l2b/.mbw）与 C 版字节级兼容**，算法行为逐模块对照。
 
 ## Source Of Truth
 
-- CLI/library defaults: `src/align/mod.rs` `AlignOpt::default()`.
-- Public story: `README.md`.
+- 参数默认值：`src/opt.rs`（对照 C 版 options.c 的 mb_opt_reset/mb_opt_preset/mb_opt_adap）
+- 索引格式：`src/l2bit.rs`（l2bit.c）、`src/bwt.rs`（bwt.c）
+- CLI：`src/main.rs`
 
-## Code Rules
+## Conventions
 
-- `unsafe_code = "forbid"`; do not introduce `unsafe`.
-- No code comments unless explicitly requested or preserving local style.
-- Keep line width within `rustfmt.toml`.
-- Keep fixes small and behavior-focused; do not add compatibility layers without a concrete persisted/external need.
-- Bug fixes require a failing regression test first.
-
-## Module Map
-
-- `src/main.rs`: clap CLI and command dispatch.
-- `src/index/`: suffix array, BWT, FM-index build/load/save.
-- `src/align/seed.rs`: SMEM/MEM seed discovery and occurrence filtering.
-- `src/align/chain.rs`: chain scoring, filtering, multi-chain extraction.
-- `src/align/sw.rs`: banded SW, global/semi-global alignment, extension primitives.
-- `src/align/extend.rs`: chain-to-CIGAR extension and zdrop plumbing.
-- `src/align/candidate.rs`: candidate collection, refinement, dedup/ranking fields.
-- `src/align/pipeline.rs`: per-read alignment, MAPQ, primary/secondary/supplementary output.
-- `src/io/`: FASTA/FASTQ/SAM parsing and formatting.
-- `src/util/dna.rs`: normalization, alphabet mapping, reverse complement.
+- 纯 Rust，`unsafe_code = "forbid"`；后缀数组用 libsais-rs
+- 字段命名与 C 版保持一致（sa_bit、min_len、max_sub_occ…）以便逐行对照
+- 提交：语义化原子提交，中文说明；每个提交独立可构建、cargo test 全绿
+- 验证：凡与 C 版有交互的格式/算法，必须有与 C 二进制的输出对照测试
+- 文档只保留中文，避免过度工程化
 
 ## Verification
 
-After code or workflow changes run the relevant subset, and before completion run all:
-
 ```bash
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-```
-
-Use `cargo bench` only for performance-sensitive changes.
-
-## Git Flow
-
-- Start by checking `git status --short --branch` and relevant worktrees.
-- Direct push to `master` is the default after verification in this single-maintainer repo.
-- Use temporary branches/worktrees only for risky or parallel work; remove them after landing.
-- Never revert or delete unrelated user changes.
-
-## Review Triggers
-
-Request review for alignment correctness, index serialization, SAM tag behavior, workflow permissions, release changes, or large repository deletions.
+cargo test
+cargo clippy --all-targets -- -D warnings
+# C 版对照（需先 make ../minibwa）
+./scripts/compare.sh <ref.fa> <reads.fq>   # M7 交付

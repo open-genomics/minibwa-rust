@@ -1,35 +1,27 @@
 [package]
-name = "bwa-rust"
-version = "0.2.0"
+name = "minibwa-rust"
+version = "0.1.0"
 edition = "2021"
-authors = ["LessUp"]
-description = "A BWA-inspired sequence aligner implemented in Rust, featuring FM-index, SMEM seeding, and banded Smith-Waterman alignment"
+authors = ["open-genomics"]
+description = "Rust 重写的 minibwa：BWT 索引 + 变长种子 + minimap2 风格链化与比对的短读比对器"
 license = "MIT"
-repository = "https://github.com/AICL-Lab/bwa-rust"
+repository = "https://github.com/open-genomics/bwa-rust"
 readme = "README.md"
 rust-version = "1.85"
-
-# ── 依赖 ──────────────────────────────────────────────
 
 [dependencies]
 anyhow = "1.0.95"
 clap = { version = "4.6.1", features = ["derive"] }
-serde = { version = "1.0.217", features = ["derive"] }
-bincode = "1.3.3"
-chrono = "0.4.39"
 rayon = "1.12.0"
+# 后缀数组构建：libsais 2.10.4 的纯 Rust 移植（与 C 版 minibwa 使用的 libsais 同源）
+libsais-rs = "0.2.2"
+# .fa.gz 透明读取（对应 C 版 minibwa 的 zlib 依赖）
+flate2 = "1"
 
-# jemalloc：替换默认 allocator，补回 musl malloc 性能差距，多线程场景显著提升
+# jemalloc：替换默认 allocator，多线程场景显著提升
 # 仅在非 Windows 平台启用（Linux glibc/musl + macOS）
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6.0"
-
-[dev-dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
-
-[[bench]]
-name = "benchmarks"
-harness = false
 
 # ── Lint 配置 ─────────────────────────────────────────
 
