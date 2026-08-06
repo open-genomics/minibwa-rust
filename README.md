@@ -15,7 +15,7 @@
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
 | M1 | 仓库骨架：CLI、参数体系（`mb_opt_t`）、DNA 工具 | ✅ |
-| M2 | l2bit + BWT + 索引构建（`index` / `getref`） | 进行中 |
+| M2 | l2bit + BWT + 索引构建（`index` / `getref`） | ✅ |
 | M3 | 两轮 SMEM 种子 + kmer 缓存 | 未开始 |
 | M4 | 链化 + hit 处理 + mapQ | 未开始 |
 | M5 | ksw2 风格比对 + CIGAR + SAM/PAF（单端一致） | 未开始 |
