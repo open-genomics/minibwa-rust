@@ -8,7 +8,6 @@ use crate::l2bit::L2b;
 use crate::opt::{flag as of, Opt};
 use crate::seed::{Anchor, SEED_IGNORE, SEED_LONG_JOIN};
 
-const CIGAR_STR: &[u8; 9] = b"MIDNSHP=X";
 
 fn min_int(a: i32, b: i32) -> i32 { if a < b { a } else { b } }
 
@@ -118,8 +117,7 @@ fn filter_bad_seeds(as1: i32, cnt1: i32, a: &mut [Anchor], min_gap: i64, diff_th
         let qs = a[(as1 + i - 1) as usize].qpos;
         let ts = a[(as1 + i - 1) as usize].tpos;
         let mut max_diff = 0i32; let mut max_diff_l = -1i32;
-        for l in (idx + 1)..n.min(idx + 1 + max_ext_cnt as usize) {
-            let j = k[l];
+        for (l, &j) in k.iter().enumerate().take(n.min(idx + 1 + max_ext_cnt as usize)).skip(idx + 1) {
             if a[(as1 + j) as usize].qpos - a[(as1 + j) as usize].len - qs > max_ext_len
                 || (a[(as1 + j) as usize].tpos - a[(as1 + j) as usize].len as i64 - ts) as i32 > max_ext_len { break; }
             let g = (a[(as1 + j) as usize].qpos as i64 - a[(as1 + j - 1) as usize].qpos as i64)
@@ -231,7 +229,7 @@ fn max_stretch(r: &Hit, a: &[Anchor]) -> (i32, i32) {
             score = a[i as usize].len; len = 1;
         }
     }
-    if score > max_score { max_score = score; max_len = len; max_i = r.a_off + r.cnt - len; }
+    if score > max_score { max_len = len; max_i = r.a_off + r.cnt - len; }
     as_ = max_i; cnt = max_len;
     (as_, cnt)
 }
@@ -255,9 +253,9 @@ fn fix_cigar(r: &mut Hit, qseq: &[u8], tseq: &[u8]) -> (i32, i32) {
                 let prev_len = (p.cigar[k - 1] >> 4) as i32;
                 let mut l = 0;
                 if op == CIGAR_INS {
-                    while l < prev_len && qseq[(qoff - 1 - l) as usize] != qseq[(qoff + len - 1 - l) as usize] { l += 1; }
+                    while l < prev_len && qseq[(qoff - 1 - l) as usize] == qseq[(qoff + len - 1 - l) as usize] { l += 1; }
                 } else {
-                    while l < prev_len && tseq[(toff - 1 - l) as usize] != tseq[(toff + len - 1 - l) as usize] { l += 1; }
+                    while l < prev_len && tseq[(toff - 1 - l) as usize] == tseq[(toff + len - 1 - l) as usize] { l += 1; }
                 }
                 if l > 0 {
                     p.cigar[k - 1] -= (l as u32) << 4;
@@ -326,7 +324,6 @@ fn fix_cigar(r: &mut Hit, qseq: &[u8], tseq: &[u8]) -> (i32, i32) {
 
 /// 计算 mlen/blen/n_ambi/dp_max，处理 EQX 和 tag（对应 `mb_update_extra`）。
 fn update_extra(r: &mut Hit, qseq: &[u8], tseq: &[u8], mat: &[i8; 25], q: i8, e: i8, opt_flag: u64, log_gap: bool) {
-    let p = r.p.as_mut().unwrap();
     let (qshift, tshift) = fix_cigar(r, qseq, tseq);
     let qseq = &qseq[qshift as usize..];
     let tseq = &tseq[tshift as usize..];
@@ -353,7 +350,10 @@ fn update_extra(r: &mut Hit, qseq: &[u8], tseq: &[u8], mat: &[i8; 25], q: i8, e:
             toff += len; qoff += len;
         } else if op == CIGAR_INS {
             let mut n_ambi = 0;
-            for l in 0..len { if (qoff + l) as usize >= qseq.len() { break; } if qseq[(qoff + l) as usize] > 3 { n_ambi += 1; } }
+            for l in 0..len {
+                if (qoff + l) as usize >= qseq.len() { break; }
+                if qseq[(qoff + l) as usize] > 3 { n_ambi += 1; }
+            }
             r.blen += len - n_ambi; p_ref.n_ambi += n_ambi as u32;
             if log_gap { s -= q as f64 + e as f64 * log2_approx(1.0 + len as f32) as f64; }
             else { s -= q as f64 + e as f64; }
@@ -361,7 +361,10 @@ fn update_extra(r: &mut Hit, qseq: &[u8], tseq: &[u8], mat: &[i8; 25], q: i8, e:
             qoff += len;
         } else if op == CIGAR_DEL {
             let mut n_ambi = 0;
-            for l in 0..len { if (toff + l) as usize >= tseq.len() { break; } if tseq[(toff + l) as usize] > 3 { n_ambi += 1; } }
+            for l in 0..len {
+                if (toff + l) as usize >= tseq.len() { break; }
+                if tseq[(toff + l) as usize] > 3 { n_ambi += 1; }
+            }
             r.blen += len - n_ambi; p_ref.n_ambi += n_ambi as u32;
             if log_gap { s -= q as f64 + e as f64 * log2_approx(1.0 + len as f32) as f64; }
             else { s -= q as f64 + e as f64; }
@@ -398,8 +401,7 @@ fn update_cigar_eqx(r: &mut Hit, qseq: &[u8], tseq: &[u8]) {
                 }
             }
         } else if op == CIGAR_INS { qoff += len; ksw2::push_cigar_vec(&mut new_cigar, op, len as u32); }
-        else if op == CIGAR_DEL { toff += len; ksw2::push_cigar_vec(&mut new_cigar, op, len as u32); }
-        else if op == 3 { toff += len; ksw2::push_cigar_vec(&mut new_cigar, op, len as u32); }
+        else if op == CIGAR_DEL || op == 3 { toff += len; ksw2::push_cigar_vec(&mut new_cigar, op, len as u32); }
         else { ksw2::push_cigar_vec(&mut new_cigar, op, len as u32); }
     }
     p.cigar = new_cigar;
@@ -452,7 +454,7 @@ fn test_zdrop(opt: &Opt, qseq: &[u8], tseq: &[u8], cigar: &[u32], mat: &[i8; 25]
 }
 
 /// 分割 hit（对应 `mb_split_hit`）。
-fn split_hit(r: &mut Hit, r2: &mut Hit, n: i32, qlen: i32, a: &[Anchor], l2b: &L2b) {
+fn split_hit(r: &mut Hit, r2: &mut Hit, n: i32, qlen: i32, a: &[Anchor], _l2b: &L2b) {
     if n <= 0 || n >= r.cnt { return; }
     *r2 = r.clone();
     r2.id = -1; r2.sam_pri = false; r2.p = None;
@@ -589,8 +591,6 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
         ts1 = ts - (if ez.reach_end { ez.mqe_t + 1 } else { ez.max_t + 1 }) as i64;
         qs1 = qs - (if ez.reach_end { qs - qs0 } else { ez.max_q + 1 });
     }
-    te1 = ts1; qe1 = qs1;
-
     // 首个锚点的精确匹配（C 版用 te-ts，不是 te-ts1）
     {
         te1 = a[as1 as usize].tpos + 1 - min_int(a[as1 as usize].len >> 1, max_back) as i64;
@@ -713,7 +713,7 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
 }
 
 /// 骨对比对编排（对应 `mb_align_skeleton`）。
-pub fn align_skeleton(opt: &Opt, idx: &Idx, qlen: i32, seq: &[u8], hits: &mut Vec<Hit>, a: &mut Vec<Anchor>) {
+pub fn align_skeleton(opt: &Opt, idx: &Idx, qlen: i32, seq: &[u8], hits: &mut Vec<Hit>, a: &mut [Anchor]) {
     let qseq0_0: Vec<u8> = seq.to_vec();
     let qseq0_1: Vec<u8> = {
         let mut v = vec![0u8; qlen as usize];
@@ -744,15 +744,6 @@ pub fn align_skeleton(opt: &Opt, idx: &Idx, qlen: i32, seq: &[u8], hits: &mut Ve
     while i < n_regs {
         let mut r2 = Hit::default();
         align1(opt, idx, qlen, &qseq0, &mut hits[i], &mut r2, a);
-        if std::env::var("MB_DEBUG_ALIGN").is_ok() {
-            if let Some(p) = &hits[i].p {
-                let cig: String = p.cigar.iter()
-                    .map(|c| format!("{}{}", c>>4, CIGAR_STR[(c&0xf) as usize] as char))
-                    .collect();
-                eprintln!("DBG hit{} qs={} qe={} ts={} te={} cigar={} cnt={}",
-                    i, hits[i].qs, hits[i].qe, hits[i].ts, hits[i].te, cig, hits[i].cnt);
-            }
-        }
         if r2.cnt > 0 {
             hits.insert(i + 1, r2);
         }
