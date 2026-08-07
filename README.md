@@ -19,12 +19,13 @@
 | M3 | 两轮 SMEM 种子 + kmer 缓存 | ✅ |
 | M4 | 链化 + hit 处理 + mapQ | ✅ |
 | M5 | ksw2 风格比对 + CIGAR + SAM/PAF（单端一致） | ✅ |
-| M6 | 配对端：insert size 统计、配对、rescue | 未开始 |
+| M6 | 配对端：insert size 统计、配对、rescue | ✅ |
 | M7 | 自适应参数全量、对比脚本、CI、文档 | 未开始 |
 
-M5 完成后，本项目已支持单端比对（`map`），并在 chrM 测试数据上与 C 版
-输出逐字段一致（含 SA:Z 与全部可选标签）。配对端（M6）尚未完成；
-生产环境请使用 [C 版 minibwa](https://github.com/lh3/minibwa)。
+M6 完成后，本项目已支持配对端比对（`map` 与 `mem` 双命令），并在 chrM 测试
+数据上与 C 版输出逐字节一致：单端、配对端（含 pestat 数据估计、proper pair
+配对、mate rescue、PE mapQ）、`-P` 跳过配对、单文件交错输入、`mem` 的
+MD:Z / n2 / XA 标签。
 
 ## 构建与使用
 
@@ -67,6 +68,8 @@ cargo test
 
 - M2：索引字节级兼容性验证（`tests/` 集成测试）
 - M5：chrM 单端 SAM/PAF 与 C 版 minibwa 逐字段一致（含 SA:Z、NM/AS/ms/md、cg:Z）
+- M6：chrM 配对端 SAM 与 C 版逐行一致（`tests/c_parity.rs` 的 `pe_sam_parity` /
+  `mem_pe_parity`，覆盖 pestat、配对、rescue、`-P`、`-5`、`-I`、`-S`）
 
 ## 许可
 
