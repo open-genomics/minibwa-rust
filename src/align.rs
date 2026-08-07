@@ -1,7 +1,7 @@
 //! 碱基级比对流水线，逐行对照 C 版 `align.c`。
 
 use crate::dna::log2_approx;
-use crate::hits::{cal_mblen, Hit, Extra, PARENT_UNSET, PARENT_TMP_PRI};
+use crate::hits::{cal_mblen, Hit, Extra, PARENT_TMP_PRI};
 use crate::index::Idx;
 use crate::ksw2::{self, flag as kf, Extz, gen_nt4_mat, CIGAR_MATCH, CIGAR_INS, CIGAR_DEL};
 use crate::l2bit::L2b;
@@ -419,7 +419,7 @@ fn test_zdrop(opt: &Opt, qseq: &[u8], tseq: &[u8], cigar: &[u32], mat: &[i8; 25]
                 if score < mx {
                     let li = i + l - max_i; let lj = j + l - max_j;
                     let diff = if li > lj { li - lj } else { lj - li };
-                    let z = mx - score - diff * opt.e as i32;
+                    let z = mx - score - diff * opt.e;
                     if z > max_zdrop {
                         max_zdrop = z;
                         pos[0] = [max_i, i + l]; pos[1] = [max_j, j + l];
@@ -433,7 +433,7 @@ fn test_zdrop(opt: &Opt, qseq: &[u8], tseq: &[u8], cigar: &[u32], mat: &[i8; 25]
             if score < mx {
                 let li = i - max_i; let lj = j - max_j;
                 let diff = if li > lj { li - lj } else { lj - li };
-                let z = mx - score - diff * opt.e as i32;
+                let z = mx - score - diff * opt.e;
                 if z > max_zdrop { max_zdrop = z; pos[0] = [max_i, i]; pos[1] = [max_j, j]; }
             } else { mx = score; max_i = i; max_j = j; }
         }
@@ -445,7 +445,7 @@ fn test_zdrop(opt: &Opt, qseq: &[u8], tseq: &[u8], cigar: &[u32], mat: &[i8; 25]
             let c = qseq[(pos[1][1] - k - 1) as usize];
             if c >= 4 { 4 } else { 3 - c }
         }).collect();
-        let score = ksw2::ll_local(&qseq2, &tseq[pos[0][0] as usize..pos[0][1] as usize], 5, mat, opt.q as i32, opt.e as i32);
+        let score = ksw2::ll_local(&qseq2, &tseq[pos[0][0] as usize..pos[0][1] as usize], 5, mat, opt.q, opt.e);
         if score >= opt.min_chain_score * opt.a && score >= opt.min_dp_max * opt.a { return 2; }
     }
     if max_zdrop > opt.zdrop { 1 } else { 0 }
@@ -580,7 +580,7 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
     // 首个锚点的精确匹配
     {
         te1 = a[as1 as usize].tpos + 1 - min_int(a[as1 as usize].len >> 1, max_back) as i64;
-        qe1 = a[as1 as usize].qpos + 1 - min_int(a[as1 as usize].len >> 1, max_back) as i32;
+        qe1 = a[as1 as usize].qpos + 1 - min_int(a[as1 as usize].len >> 1, max_back);
         ksw2::push_cigar_vec(&mut r.p.as_mut().unwrap().cigar, CIGAR_MATCH, (te1 - ts1) as u32);
         r.p.as_mut().unwrap().dp_score += opt.a * (te1 - ts1) as i32;
     }
@@ -591,7 +591,7 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
         let ai = &a[(as1 + i) as usize];
         if ai.flag & SEED_IGNORE != 0 && i != cnt1 - 1 { continue; }
         let te1_i = ai.tpos + 1 - min_int(ai.len >> 1, max_back) as i64;
-        let qe1_i = ai.qpos + 1 - min_int(ai.len >> 1, max_back) as i32;
+        let qe1_i = ai.qpos + 1 - min_int(ai.len >> 1, max_back);
         if i == cnt1 - 1 || ai.flag & SEED_LONG_JOIN != 0 || (qe1_i - qs_cur >= opt.min_ksw_len && te1_i - ts_cur >= opt.min_ksw_len as i64) {
             let mut bw1 = bw_long;
             let mut d1 = 0i64;
@@ -618,7 +618,7 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
                 for &c in &ez.cigar { ksw2::push_cigar_vec(&mut r.p.as_mut().unwrap().cigar, c & 0xf, c >> 4); }
             }
             if ez.zdropped {
-                let mut j = (i - 1) as i32 - 1;
+                let mut j = (i - 1) - 1;
                 while j >= 0 {
                     if a[(as1 + j) as usize].tpos <= ts_cur + ez.max_t as i64 { break; }
                     j -= 1;
