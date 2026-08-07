@@ -35,7 +35,11 @@ pub fn write_header<W: Write, S: AsRef<str>>(out: &mut W, contigs: &[(S, u32)]) 
     for (name, len) in contigs {
         writeln!(out, "@SQ\tSN:{}\tLN:{}", name.as_ref(), len)?;
     }
-    writeln!(out, "@PG\tID:bwa-rust\tPN:bwa-rust\tVN:{}", env!("CARGO_PKG_VERSION"))?;
+    writeln!(
+        out,
+        "@PG\tID:minibwa-rust\tPN:minibwa-rust\tVN:{}",
+        env!("CARGO_PKG_VERSION")
+    )?;
     Ok(())
 }
 
@@ -249,7 +253,7 @@ mod tests {
         assert!(s.contains("@HD\tVN:1.6\tSO:unsorted"));
         assert!(s.contains("@SQ\tSN:chr1\tLN:1000"));
         assert!(s.contains("@SQ\tSN:chr2\tLN:2000"));
-        assert!(s.contains("@PG\tID:bwa-rust"));
+        assert!(s.contains("@PG\tID:minibwa-rust"));
     }
 
     #[test]
