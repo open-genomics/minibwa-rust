@@ -23,8 +23,8 @@ fn main() {
     let zdrop: i32 = args[6].parse().unwrap();
     let end_bonus: i32 = args[7].parse().unwrap();
     let fstr = &args[8];
-    let flag: u32 = if fstr.starts_with("0x") {
-        u32::from_str_radix(&fstr[2..], 16).unwrap()
+    let flag: u32 = if let Some(hex) = fstr.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16).unwrap()
     } else {
         fstr.parse().unwrap()
     };

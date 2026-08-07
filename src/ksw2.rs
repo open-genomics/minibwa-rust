@@ -25,18 +25,40 @@ pub const CIGAR_DEL: u32 = 2;
 
 #[derive(Debug, Clone, Default)]
 pub struct Extz {
-    pub max: i32, pub zdropped: bool, pub max_q: i32, pub max_t: i32,
-    pub mqe: i32, pub mqe_t: i32, pub mte: i32, pub mte_q: i32,
-    pub score: i32, pub cigar: Vec<u32>, pub reach_end: bool,
+    pub max: i32,
+    pub zdropped: bool,
+    pub max_q: i32,
+    pub max_t: i32,
+    pub mqe: i32,
+    pub mqe_t: i32,
+    pub mte: i32,
+    pub mte_q: i32,
+    pub score: i32,
+    pub cigar: Vec<u32>,
+    pub reach_end: bool,
 }
 
 pub fn reset_extz(ez: &mut Extz) {
-    *ez = Extz { max: 0, score: NEG_INF, mqe: NEG_INF, mte: NEG_INF,
-        max_q: -1, max_t: -1, mqe_t: -1, mte_q: -1, ..Default::default() };
+    *ez = Extz {
+        max: 0,
+        score: NEG_INF,
+        mqe: NEG_INF,
+        mte: NEG_INF,
+        max_q: -1,
+        max_t: -1,
+        mqe_t: -1,
+        mte_q: -1,
+        ..Default::default()
+    };
 }
 
 pub fn push_cigar_vec(c: &mut Vec<u32>, op: u32, len: u32) {
-    if let Some(l) = c.last_mut() { if *l & 0xf == op { *l += len << 4; return; } }
+    if let Some(l) = c.last_mut() {
+        if *l & 0xf == op {
+            *l += len << 4;
+            return;
+        }
+    }
     c.push(len << 4 | op);
 }
 
@@ -45,191 +67,558 @@ pub fn gen_nt4_mat(mat: &mut [i8; 25], a: i8, b: i8, b_ts: i8, b_ambi: i8, mt: i
     let (a, b) = (a.abs(), if b > 0 { -b } else { b });
     let b_ambi = if b_ambi > 0 { -b_ambi } else { b_ambi };
     for i in 0..M - 1 {
-        for j in 0..M - 1 { mat[i * M + j] = if i == j { a } else { b }; }
+        for j in 0..M - 1 {
+            mat[i * M + j] = if i == j { a } else { b };
+        }
         mat[i * M + M - 1] = b_ambi;
     }
-    for j in 0..M { mat[(M - 1) * M + j] = 0; }
-    if b_ts != 0 && mt == 0 { mat[M + 3] = -b_ts; mat[3 * M + 1] = -b_ts; }
+    for j in 0..M {
+        mat[(M - 1) * M + j] = b_ambi;
+    }
+    if b_ts != 0 && b_ts != b {
+        let b_ts = if b_ts > 0 { -b_ts } else { b_ts };
+        mat[2] = b_ts;
+        mat[M + 3] = b_ts;
+        mat[2 * M] = b_ts;
+        mat[3 * M + 1] = b_ts;
+    }
+    if mt == 1 {
+        mat[M + 3] = a;
+    } else if mt == 2 {
+        mat[2 * M] = a;
+    }
 }
 
-fn backtrack(is_rev: bool, p: &[Vec<u8>], i0: i32, j0: i32, cigar: &mut Vec<u32>) {
-    let (mut i, mut j, mut state) = (i0, j0, 0u8);
-    while i >= 0 && j >= 0 {
-        let tmp = p[i as usize][j as usize];
-        if state == 0 { state = tmp & 7; }
-        else if tmp >> (state + 2) & 1 == 0 { state = 0; }
-        if state == 0 { state = tmp & 7; }
-        match state {
-            0 => { push_cigar_vec(cigar, CIGAR_MATCH, 1); i -= 1; j -= 1; }
-            1 | 3 => { push_cigar_vec(cigar, CIGAR_DEL, 1); j -= 1; }
-            _ => { push_cigar_vec(cigar, CIGAR_INS, 1); i -= 1; }
+#[allow(clippy::too_many_arguments)]
+fn ksw_extd2_antidiag(
+    qlen: usize,
+    query: &[u8],
+    tlen: usize,
+    target: &[u8],
+    m: usize,
+    mat: &[i8],
+    q: i8,
+    e: i8,
+    q2: i8,
+    e2: i8,
+    w: i32,
+    zdrop: i32,
+    end_bonus: i32,
+    flags: u32,
+    qe_for_h: i32,
+    with_cigar: bool,
+    right: bool,
+    ez: &mut Extz,
+) {
+    let generic = flags & flag::GENERIC_SC != 0;
+    let approx_max = flags & flag::APPROX_MAX != 0;
+    let extz_only = flags & flag::EXTZ_ONLY != 0;
+    let approx_drop = flags & flag::APPROX_DROP != 0;
+    let qe = q as i32 + e as i32;
+    let qe2 = q2 as i32 + e2 as i32;
+    let sc_mch = mat[0];
+    let sc_n = if mat[m * m - 1] == 0 { -e2 } else { mat[m * m - 1] };
+    let m1 = (m - 1) as u8;
+    let max_sc = mat.iter().take(m * m).map(|&v| v as i32).max().unwrap();
+    let tpad = tlen.div_ceil(16) * 16;
+
+    let mut u = vec![-(qe as i8); tpad];
+    let mut v = vec![-(qe as i8); tpad];
+    let mut x = vec![-(qe as i8); tpad];
+    let mut y = vec![-(qe as i8); tpad];
+    let mut x2 = vec![-(qe2 as i8); tpad];
+    let mut y2 = vec![-(qe2 as i8); tpad];
+    let mut scores = vec![0i8; tpad];
+    let mut h = if approx_max { None } else { Some(vec![NEG_INF; tlen]) };
+    let mut h0 = 0i32;
+    let mut last_h0_t = 0i32;
+    let mut last_max_h = 0i32;
+    let mut last_st = -1i32;
+    let mut last_en = -1i32;
+    let mut p = Vec::new();
+    let mut off = Vec::new();
+    let mut off_end = Vec::new();
+    let long_thres = if e != e2 {
+        (q2 as i32 - q as i32) / (e as i32 - e2 as i32) - 1
+    } else {
+        0
+    };
+    let long_thres = if q2 as i32 + e2 as i32 + long_thres * e2 as i32 > q as i32 + e as i32 + long_thres * e as i32 {
+        long_thres + 1
+    } else {
+        long_thres
+    };
+    let long_diff = long_thres * (e as i32 - e2 as i32) - (q2 as i32 - q as i32) - e2 as i32;
+    let band = if w < 0 { qlen.max(tlen) as i32 } else { w };
+
+    for r in 0..(qlen + tlen - 1) as i32 {
+        let mut st0 = 0i32;
+        let mut en0 = tlen as i32 - 1;
+        st0 = st0.max(r - qlen as i32 + 1);
+        en0 = en0.min(r);
+        st0 = st0.max((r - band + 1) >> 1);
+        en0 = en0.min((r + band) >> 1);
+        if st0 > en0 {
+            ez.zdropped = true;
+            break;
+        }
+
+        let st = (st0 / 16) * 16;
+        let en = ((en0 + 16) / 16) * 16 - 1;
+        let mut drow = if with_cigar {
+            vec![0u8; (en - st + 1) as usize]
+        } else {
+            Vec::new()
+        };
+
+        let mut x1 = -(qe as i8);
+        let mut x21 = -(qe2 as i8);
+        let mut v1 = -(qe as i8);
+        if st > 0 {
+            if st > last_st && st - 1 <= last_en {
+                let t = (st - 1) as usize;
+                x1 = x[t];
+                x21 = x2[t];
+                v1 = v[t];
+            }
+        } else {
+            v1 = if r == 0 {
+                -(qe as i8)
+            } else if r < long_thres {
+                -e
+            } else if r == long_thres {
+                long_diff as i8
+            } else {
+                -e2
+            };
+        }
+        if en >= r {
+            let t = r as usize;
+            y[t] = -(qe as i8);
+            y2[t] = -(qe2 as i8);
+            u[t] = if r == 0 {
+                -(qe as i8)
+            } else if r < long_thres {
+                -e
+            } else if r == long_thres {
+                long_diff as i8
+            } else {
+                -e2
+            };
+        }
+
+        if generic {
+            for t_i in st0..=en0 {
+                let t = t_i as usize;
+                scores[t] = mat[target[t] as usize * m + query[(r - t_i) as usize] as usize];
+            }
+        } else {
+            let mut start = st0;
+            while start <= en0 {
+                for lane in 0..16i32 {
+                    let t_i = start + lane;
+                    let t = t_i as usize;
+                    if t >= tpad {
+                        continue;
+                    }
+                    let target_base = if t < tlen { target[t] } else { 0 };
+                    let qrr_pos = qlen as i32 - 1 - r + t_i;
+                    let query_base = if qrr_pos >= 0 && qrr_pos < qlen as i32 {
+                        query[qlen - 1 - qrr_pos as usize]
+                    } else if qrr_pos < 0 {
+                        let sf_pos = tpad as i32 + qrr_pos;
+                        if sf_pos >= 0 && sf_pos < tpad as i32 && (sf_pos as usize) < tlen {
+                            target[sf_pos as usize]
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    };
+                    scores[t] = if target_base == m1 || query_base == m1 {
+                        sc_n
+                    } else if target_base == query_base {
+                        sc_mch
+                    } else {
+                        mat[1]
+                    };
+                }
+                start += 16;
+            }
+        }
+
+        for t_i in st..=en {
+            let t = t_i as usize;
+            let old_x = x[t];
+            let old_x2 = x2[t];
+            let old_v = v[t];
+            let old_y = y[t];
+            let old_y2 = y2[t];
+            let old_u = u[t];
+            let score = scores[t];
+
+            let a = x1.wrapping_add(v1);
+            let b = old_y.wrapping_add(old_u);
+            let a2 = x21.wrapping_add(v1);
+            let b2 = old_y2.wrapping_add(old_u);
+            let mut z = score;
+            let mut d = 0u8;
+            if !right {
+                if a > z {
+                    d = 1;
+                    z = a;
+                }
+                if b > z {
+                    d = 2;
+                    z = b;
+                }
+                if a2 > z {
+                    d = 3;
+                    z = a2;
+                }
+                if b2 > z {
+                    d = 4;
+                    z = b2;
+                }
+            } else {
+                if z <= a {
+                    d = 1;
+                    z = a;
+                }
+                if z <= b {
+                    d = 2;
+                    z = b;
+                }
+                if z <= a2 {
+                    d = 3;
+                    z = a2;
+                }
+                if z <= b2 {
+                    d = 4;
+                    z = b2;
+                }
+            }
+            z = z.min(sc_mch);
+
+            u[t] = z.wrapping_sub(v1);
+            v[t] = z.wrapping_sub(old_u);
+
+            let z_q = z.wrapping_sub(q);
+            let a = a.wrapping_sub(z_q);
+            let b = b.wrapping_sub(z_q);
+            let z_q2 = z.wrapping_sub(q2);
+            let a2 = a2.wrapping_sub(z_q2);
+            let b2 = b2.wrapping_sub(z_q2);
+            let positive = |v: i8| if right { v >= 0 } else { v > 0 };
+            x[t] = if positive(a) { a } else { 0 }.wrapping_sub(qe as i8);
+            y[t] = if positive(b) { b } else { 0 }.wrapping_sub(qe as i8);
+            x2[t] = if positive(a2) { a2 } else { 0 }.wrapping_sub(qe2 as i8);
+            y2[t] = if positive(b2) { b2 } else { 0 }.wrapping_sub(qe2 as i8);
+            if with_cigar {
+                if positive(a) {
+                    d |= 0x08;
+                }
+                if positive(b) {
+                    d |= 0x10;
+                }
+                if positive(a2) {
+                    d |= 0x20;
+                }
+                if positive(b2) {
+                    d |= 0x40;
+                }
+                drow[(t_i - st) as usize] = d;
+            }
+
+            x1 = old_x;
+            x21 = old_x2;
+            v1 = old_v;
+        }
+
+        if with_cigar {
+            off.push(st);
+            off_end.push(en);
+            p.push(drow);
+        }
+
+        if approx_max {
+            if r > 0 {
+                if last_h0_t >= st0 && last_h0_t <= en0 && last_h0_t + 1 >= st0 && last_h0_t < en0 {
+                    let d0 = v[last_h0_t as usize] as i32;
+                    let d1 = u[(last_h0_t + 1) as usize] as i32;
+                    if d0 > d1 {
+                        h0 += d0;
+                    } else {
+                        h0 += d1;
+                        last_h0_t += 1;
+                    }
+                } else if last_h0_t >= st0 && last_h0_t <= en0 {
+                    h0 += v[last_h0_t as usize] as i32;
+                } else {
+                    last_h0_t += 1;
+                    h0 += u[last_h0_t as usize] as i32;
+                }
+                if approx_drop && zdrop >= 0 {
+                    let t = last_h0_t;
+                    if h0 > ez.max {
+                        ez.max = h0;
+                        ez.max_t = t;
+                        ez.max_q = r - t;
+                    } else if t >= ez.max_t && r - t >= ez.max_q {
+                        let l = (t - ez.max_t - (r - t - ez.max_q)).abs();
+                        if ez.max - h0 > zdrop + l * e2 as i32 {
+                            ez.zdropped = true;
+                            break;
+                        }
+                    }
+                }
+                if r == (qlen + tlen - 2) as i32 && en0 == tlen as i32 - 1 {
+                    ez.score = h0;
+                }
+            } else {
+                h0 = v[0] as i32 - qe_for_h;
+                last_h0_t = 0;
+            }
+        } else {
+            let h = h.as_mut().unwrap();
+            let (max_h, max_t) = if r == 0 {
+                h[0] = v[0] as i32 - qe_for_h;
+                (h[0], 0)
+            } else {
+                let en = en0 as usize;
+                h[en] = if en0 > 0 {
+                    h[en - 1] + u[en] as i32
+                } else {
+                    h[en] + v[en] as i32
+                };
+                let mut max_h = h[en];
+                let mut max_t = en0;
+                let mut lane_h = [max_h; 4];
+                let mut lane_t = [max_t; 4];
+                let en1 = st0 + (en0 - st0) / 4 * 4;
+                let mut t_i = st0;
+                while t_i < en1 {
+                    for lane in 0usize..4 {
+                        let t = t_i as usize + lane;
+                        h[t] += v[t] as i32;
+                        if h[t] > lane_h[lane] {
+                            lane_h[lane] = h[t];
+                            lane_t[lane] = t_i;
+                        }
+                    }
+                    t_i += 4;
+                }
+                for lane in 0..4 {
+                    if max_h < lane_h[lane] {
+                        max_h = lane_h[lane];
+                        max_t = lane_t[lane] + lane as i32;
+                    }
+                }
+                while t_i < en0 {
+                    let t = t_i as usize;
+                    h[t] += v[t] as i32;
+                    if h[t] > max_h {
+                        max_h = h[t];
+                        max_t = t_i;
+                    }
+                    t_i += 1;
+                }
+                (max_h, max_t)
+            };
+            if en0 == tlen as i32 - 1 && h[en0 as usize] > ez.mte {
+                ez.mte = h[en0 as usize];
+                ez.mte_q = r - en0;
+            }
+            if r - st0 == qlen as i32 - 1 && h[st0 as usize] > ez.mqe {
+                ez.mqe = h[st0 as usize];
+                ez.mqe_t = st0;
+            }
+            if max_h > ez.max {
+                ez.max = max_h;
+                ez.max_t = max_t;
+                ez.max_q = r - max_t;
+            } else if max_t >= ez.max_t && r - max_t >= ez.max_q {
+                let l = (max_t - ez.max_t - (r - max_t - ez.max_q)).abs();
+                if zdrop >= 0 && ez.max - max_h > zdrop + l * e2 as i32 {
+                    ez.zdropped = true;
+                    break;
+                }
+            }
+            if r == (qlen + tlen - 2) as i32 && en0 == tlen as i32 - 1 {
+                ez.score = h[tlen - 1];
+            }
+            if extz_only {
+                let r_h = last_max_h.max(max_h);
+                let rq = qlen as i32 - (r - st0);
+                let rt = tlen as i32 - en0;
+                let rm = if rq >= tlen as i32 - st0 {
+                    tlen as i32 - st0
+                } else if rt >= qlen as i32 - (r - en0) {
+                    qlen as i32 - (r - en0)
+                } else {
+                    tlen as i32 + qlen as i32 - 1 - r
+                };
+                if r_h + rm * max_sc + end_bonus < ez.max {
+                    break;
+                }
+            }
+            last_max_h = max_h;
+        }
+        last_st = st;
+        last_en = en;
+    }
+
+    if with_cigar {
+        if !ez.zdropped && !extz_only {
+            backtrack(
+                flags & flag::REV_CIGAR != 0,
+                &p,
+                &off,
+                &off_end,
+                tlen as i32 - 1,
+                qlen as i32 - 1,
+                &mut ez.cigar,
+            );
+        } else if extz_only && ez.mqe + end_bonus > ez.max {
+            ez.reach_end = true;
+            backtrack(
+                flags & flag::REV_CIGAR != 0,
+                &p,
+                &off,
+                &off_end,
+                ez.mqe_t,
+                qlen as i32 - 1,
+                &mut ez.cigar,
+            );
+        } else if ez.max_t >= 0 && ez.max_q >= 0 {
+            backtrack(
+                flags & flag::REV_CIGAR != 0,
+                &p,
+                &off,
+                &off_end,
+                ez.max_t,
+                ez.max_q,
+                &mut ez.cigar,
+            );
         }
     }
-    if i >= 0 { push_cigar_vec(cigar, CIGAR_INS, (i + 1) as u32); }
-    if j >= 0 { push_cigar_vec(cigar, CIGAR_DEL, (j + 1) as u32); }
-    if !is_rev { cigar.reverse(); }
+}
+
+fn backtrack(is_rev: bool, p: &[Vec<u8>], off: &[i32], off_end: &[i32], i0: i32, j0: i32, cigar: &mut Vec<u32>) {
+    let (mut i, mut j, mut state) = (i0, j0, 0u8);
+    while i >= 0 && j >= 0 {
+        let r = (i + j) as usize;
+        let mut force_state = -1i32;
+        if i < off[r] {
+            force_state = 2;
+        }
+        if i > off_end[r] {
+            force_state = 1;
+        }
+        let tmp = if force_state < 0 {
+            p[r][(i - off[r]) as usize]
+        } else {
+            0
+        };
+        if state == 0 {
+            state = tmp & 7;
+        } else if tmp >> (state + 2) & 1 == 0 {
+            state = 0;
+        }
+        if state == 0 {
+            state = tmp & 7;
+        }
+        if force_state >= 0 {
+            state = force_state as u8;
+        }
+        match state {
+            0 => {
+                push_cigar_vec(cigar, CIGAR_MATCH, 1);
+                i -= 1;
+                j -= 1;
+            }
+            1 | 3 => {
+                push_cigar_vec(cigar, CIGAR_DEL, 1);
+                i -= 1;
+            }
+            _ => {
+                push_cigar_vec(cigar, CIGAR_INS, 1);
+                j -= 1;
+            }
+        }
+    }
+    if i >= 0 {
+        push_cigar_vec(cigar, CIGAR_DEL, (i + 1) as u32);
+    }
+    if j >= 0 {
+        push_cigar_vec(cigar, CIGAR_INS, (j + 1) as u32);
+    }
+    if !is_rev {
+        cigar.reverse();
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn ksw_extd2(
-    qlen: i32, query: &[u8], tlen: i32, target: &[u8], m: i32, mat: &[i8],
-    mut q: i8, mut e: i8, mut q2: i8, mut e2: i8, mut w: i32,
-    zdrop: i32, end_bonus: i32, flags: u32, ez: &mut Extz,
+    qlen: i32,
+    query: &[u8],
+    tlen: i32,
+    target: &[u8],
+    m: i32,
+    mat: &[i8],
+    mut q: i8,
+    mut e: i8,
+    mut q2: i8,
+    mut e2: i8,
+    mut w: i32,
+    zdrop: i32,
+    end_bonus: i32,
+    flags: u32,
+    ez: &mut Extz,
 ) {
     reset_extz(ez);
-    if m <= 1 || qlen <= 0 || tlen <= 0 { return; }
+    if m <= 1 || qlen <= 0 || tlen <= 0 {
+        return;
+    }
+    let qe_for_h = q as i32 + e as i32;
     if (q2 as i32 + e2 as i32) < (q as i32 + e as i32) {
-        std::mem::swap(&mut q, &mut q2); std::mem::swap(&mut e, &mut e2);
+        std::mem::swap(&mut q, &mut q2);
+        std::mem::swap(&mut e, &mut e2);
     }
     let with_cigar = flags & flag::SCORE_ONLY == 0;
     let right = flags & flag::RIGHT != 0;
-    let generic = flags & flag::GENERIC_SC != 0;
-    let qlen = qlen as usize; let tlen = tlen as usize; let m = m as usize;
-    let (qe, qe2) = (q as i32 + e as i32, q2 as i32 + e2 as i32);
-    let sc_mch = mat[0] as i32;
-    let sc_n = if mat[m * m - 1] == 0 { -e2 as i32 } else { mat[m * m - 1] as i32 };
-    let m1 = (m - 1) as u8;
+    let qlen = qlen as usize;
+    let tlen = tlen as usize;
+    let m = m as usize;
+    let qe = q as i32 + e as i32;
 
-    if w < 0 { w = tlen.max(qlen) as i32; }
-    let w = w as usize;
-    let mut max_sc = mat[0] as i32; let mut min_sc = mat[1] as i32;
+    if w < 0 {
+        w = tlen.max(qlen) as i32;
+    }
+    let mut min_sc = mat[1] as i32;
     for &v in mat.iter().take(m * m).skip(1) {
-        if (v as i32) > max_sc { max_sc = v as i32; }
-        if (v as i32) < min_sc { min_sc = v as i32; }
-    }
-    if -min_sc > 2 * qe { return; }
-    if qlen as i64 * tlen as i64 > 100_000_000 { ez.zdropped = true; return; }
-
-    // 行滚动数组
-    let mut hp = vec![NEG_INF; tlen];  // H(i-1, j)
-    let mut hc = vec![NEG_INF; tlen];  // H(i, j)
-    let mut e1 = vec![NEG_INF; tlen];  // E1(i, j) — 同行左→右
-    let mut e2arr = vec![NEG_INF; tlen];
-    let mut f1p = vec![NEG_INF; tlen]; // F1(i-1, j)
-    let mut f1c = vec![NEG_INF; tlen]; // F1(i, j)
-    let mut f2p = vec![NEG_INF; tlen];
-    let mut f2c = vec![NEG_INF; tlen];
-
-    let mut p: Vec<Vec<u8>> = if with_cigar { vec![vec![0u8; tlen]; qlen] } else { Vec::new() };
-
-    for i in 0..qlen {
-        let j_lo = i.saturating_sub(w);
-        let j_hi = (i + w).min(tlen - 1);
-        for j in 0..tlen { hc[j] = NEG_INF; e1[j] = NEG_INF; e2arr[j] = NEG_INF; f1c[j] = NEG_INF; f2c[j] = NEG_INF; }
-
-        for j in j_lo..=j_hi {
-            let s = if generic {
-                mat[target[j] as usize * m + query[i] as usize] as i32
-            } else {
-                let (sq, qt) = (target[j], query[i]);
-                if sq == m1 || qt == m1 { sc_n } else if sq == qt { sc_mch } else { mat[1] as i32 }
-            };
-
-            // 对角线 H(i-1, j-1)
-            let h_diag = if i == 0 && j == 0 { 0 } else if j > 0 { hp[j - 1] } else { NEG_INF };
-            let mut h = h_diag.saturating_add(s);
-            let mut d = 0u8;
-
-            // E1 (DEL): H(i, j-1) 开 / E1(i, j-1) 延伸 / 地板 -(q+e)
-            if j > 0 {
-                let open = hc[j - 1].saturating_sub(qe);
-                let ext = e1[j - 1].saturating_sub(e as i32);
-                let val = open.max(ext).max(-qe);
-                e1[j] = val;
-                // 决策：left 用 a > h（严格），right 用 a >= h
-                let a_raw = (hc[j - 1].saturating_sub(q as i32)).max(e1[j - 1]); // 地板前候选
-                if !right {
-                    if val > h { d = 1; h = val; }
-                } else if val >= h { d = 1; h = val; }
-                if !right { if a_raw > 0 { d |= 0x08; } }
-                else if a_raw >= 0 { d |= 0x08; }
-            }
-
-            // F1 (INS): H(i-1, j) 开 / F1(i-1, j) 延伸 / 地板
-            {
-                let open = hp[j].saturating_sub(qe);
-                let ext = f1p[j].saturating_sub(e as i32);
-                let val = open.max(ext).max(-qe);
-                f1c[j] = val;
-                let a_raw = (hp[j].saturating_sub(q as i32)).max(f1p[j]);
-                if !right {
-                    if val > h { d = 2; h = val; }
-                } else if val >= h { d = 2; h = val; }
-                if !right { if a_raw > 0 { d |= 0x10; } }
-                else if a_raw >= 0 { d |= 0x10; }
-            }
-
-            // E2 (long DEL)
-            if j > 0 {
-                let open = hc[j - 1].saturating_sub(qe2);
-                let ext = e2arr[j - 1].saturating_sub(e2 as i32);
-                let val = open.max(ext).max(-qe2);
-                e2arr[j] = val;
-                let a_raw = (hc[j - 1].saturating_sub(q2 as i32)).max(e2arr[j - 1]);
-                if !right {
-                    if val > h { d = 3; h = val; }
-                } else if val >= h { d = 3; h = val; }
-                if !right { if a_raw > 0 { d |= 0x20; } }
-                else if a_raw >= 0 { d |= 0x20; }
-            }
-
-            // F2 (long INS)
-            {
-                let open = hp[j].saturating_sub(qe2);
-                let ext = f2p[j].saturating_sub(e2 as i32);
-                let val = open.max(ext).max(-qe2);
-                f2c[j] = val;
-                let a_raw = (hp[j].saturating_sub(q2 as i32)).max(f2p[j]);
-                if !right {
-                    if val > h { d = 4; h = val; }
-                } else if val >= h { d = 4; h = val; }
-                if !right { if a_raw > 0 { d |= 0x40; } }
-                else if a_raw >= 0 { d |= 0x40; }
-            }
-
-            hc[j] = h;
-            if with_cigar { p[i][j] = d; }
-
-            // max / zdrop：APPROX_MAX && !APPROX_DROP 时跳过（C 版同样不更新 ez.max）
-            let track_max = !(flags & flag::APPROX_MAX != 0 && flags & flag::APPROX_DROP == 0);
-            if track_max {
-                let (r, t) = ((i + j) as i32, j as i32);
-                if h > ez.max {
-                    ez.max = h; ez.max_t = t; ez.max_q = r - t;
-                } else if t >= ez.max_t && r - t >= ez.max_q {
-                    let (tl, ql) = (t - ez.max_t, (r - t) - ez.max_q);
-                    let l = if tl > ql { tl - ql } else { ql - tl };
-                    if zdrop >= 0 && ez.max - h > zdrop + l * e2 as i32 { ez.zdropped = true; }
-                }
-                if j == tlen - 1 && h > ez.mte { ez.mte = h; ez.mte_q = i as i32; }
-                if i == qlen - 1 && h > ez.mqe { ez.mqe = h; ez.mqe_t = j as i32; }
-            }
-        }
-
-        std::mem::swap(&mut hp, &mut hc);
-        std::mem::swap(&mut f1p, &mut f1c);
-        std::mem::swap(&mut f2p, &mut f2c);
-        if ez.zdropped { break; }
-    }
-
-    if !ez.zdropped { ez.score = hp[tlen - 1]; }
-
-    if with_cigar {
-        let rev = flags & flag::REV_CIGAR != 0;
-        if !ez.zdropped && flags & flag::EXTZ_ONLY == 0 {
-            backtrack(rev, &p, qlen as i32 - 1, tlen as i32 - 1, &mut ez.cigar);
-        } else if flags & flag::EXTZ_ONLY != 0 && ez.mqe + end_bonus > ez.max {
-            ez.reach_end = true;
-            backtrack(rev, &p, qlen as i32 - 1, ez.mqe_t, &mut ez.cigar);
-        } else if ez.max_q >= 0 && ez.max_t >= 0 {
-            backtrack(rev, &p, ez.max_q - 1, ez.max_t, &mut ez.cigar);
+        if (v as i32) < min_sc {
+            min_sc = v as i32;
         }
     }
+    if -min_sc > 2 * qe {
+        return;
+    }
+    if qlen as i64 * tlen as i64 > 100_000_000 {
+        ez.zdropped = true;
+        return;
+    }
+
+    ksw_extd2_antidiag(
+        qlen, query, tlen, target, m, mat, q, e, q2, e2, w, zdrop, end_bonus, flags, qe_for_h, with_cigar, right, ez,
+    );
 }
 
 pub fn ll_local(query: &[u8], target: &[u8], m: usize, mat: &[i8], gapo: i32, gape: i32) -> i32 {
     let (qlen, tlen) = (query.len(), target.len());
-    if qlen == 0 || tlen == 0 { return 0; }
+    if qlen == 0 || tlen == 0 {
+        return 0;
+    }
     let mut h = vec![0i32; qlen + 1];
     let mut er = vec![NEG_INF; qlen + 1];
     let mut best = 0i32;
@@ -243,11 +632,19 @@ pub fn ll_local(query: &[u8], target: &[u8], m: usize, mat: &[i8], gapo: i32, ga
             er[i] = (er[i] - gape).max(hd - gapo - gape);
             f = (f - gape).max(hp - gapo - gape);
             let mut hh = hd + s;
-            if er[i] > hh { hh = er[i]; }
-            if f > hh { hh = f; }
-            if hh < 0 { hh = 0; }
+            if er[i] > hh {
+                hh = er[i];
+            }
+            if f > hh {
+                hh = f;
+            }
+            if hh < 0 {
+                hh = 0;
+            }
             h[i] = hh;
-            if hh > best { best = hh; }
+            if hh > best {
+                best = hh;
+            }
             hd = hp;
         }
     }
