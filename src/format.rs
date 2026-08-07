@@ -5,15 +5,7 @@ use crate::l2bit::L2b;
 use crate::opt::Opt;
 
 /// PAF 一行（对应 `mb_fmt_paf`）。hit=None 输出未比对行。
-pub fn fmt_paf(
-    out: &mut String,
-    l2b: &L2b,
-    qname: &str,
-    qlen: usize,
-    hit: Option<&Hit>,
-    n_seg: usize,
-    seg_idx: usize,
-) {
+pub fn fmt_paf(out: &mut String, l2b: &L2b, qname: &str, qlen: usize, hit: Option<&Hit>, n_seg: usize, seg_idx: usize) {
     out.push_str(qname);
     if n_seg > 1 {
         out.push_str(&format!("/{}", seg_idx + 1));
@@ -45,7 +37,13 @@ pub fn fmt_paf(
     }
     if let Some(ep) = &p.p {
         let nm = p.blen - p.mlen + ep.n_ambi as i32;
-        out.push_str(&format!("\tNM:i:{}\tAS:i:{}\tms:i:{}\tmd:i:{}", nm, ep.dp_score, ep.dp_max0, ep.dp_max - ep.dp_max2));
+        out.push_str(&format!(
+            "\tNM:i:{}\tAS:i:{}\tms:i:{}\tmd:i:{}",
+            nm,
+            ep.dp_score,
+            ep.dp_max0,
+            ep.dp_max - ep.dp_max2
+        ));
         if !ep.cigar.is_empty() {
             out.push_str("\tcg:Z:");
             for &c in &ep.cigar {
@@ -96,10 +94,7 @@ pub fn fmt_sam_hdr(l2b: &L2b, ver: &str, rg: Option<&str>) -> (String, Option<St
             let escaped = escape(rg);
             if let Some(p) = escaped.find("\tID:") {
                 let id_st = p + 4;
-                let id_en = escaped[id_st..]
-                    .find(['\t', '\n'])
-                    .map(|i| id_st + i)
-                    .unwrap_or(escaped.len());
+                let id_en = escaped[id_st..].find(['\t', '\n']).map(|i| id_st + i).unwrap_or(escaped.len());
                 rg_id = Some(escaped[id_st..id_en].to_string());
                 s.push_str(&escaped);
                 s.push('\n');
@@ -178,21 +173,34 @@ pub fn fmt_sam(
         flag |= 0x1;
     }
     if let Some(r) = r {
-        if r.rev { flag |= 0x10; }
-        if r.parent != r.id { flag |= 0x100; }
-        else if !r.sam_pri { flag |= 0x800; }
+        if r.rev {
+            flag |= 0x10;
+        }
+        if r.parent != r.id {
+            flag |= 0x100;
+        } else if !r.sam_pri {
+            flag |= 0x800;
+        }
     } else {
         flag |= 0x4;
     }
     if n_seg > 1 {
         if let Some(r) = r {
-            if r.proper_pair { flag |= 0x2; }
+            if r.proper_pair {
+                flag |= 0x2;
+            }
         }
-        if seg_idx == 0 { flag |= 0x40; }
-        else if seg_idx == n_seg - 1 { flag |= 0x80; }
-        if mate.is_none() { flag |= 0x8; }
-        else if let Some(m) = mate {
-            if m.rev { flag |= 0x20; }
+        if seg_idx == 0 {
+            flag |= 0x40;
+        } else if seg_idx == n_seg - 1 {
+            flag |= 0x80;
+        }
+        if mate.is_none() {
+            flag |= 0x8;
+        } else if let Some(m) = mate {
+            if m.rev {
+                flag |= 0x20;
+            }
         }
     }
     out.push_str(&format!("\t{}", flag));
@@ -271,7 +279,10 @@ pub fn fmt_sam(
         None => {
             sam_write_sq(out, seq_raw, false);
             out.push('\t');
-            match qual { Some(q) => out.push_str(std::str::from_utf8(q).unwrap_or("*")), None => out.push('*') }
+            match qual {
+                Some(q) => out.push_str(std::str::from_utf8(q).unwrap_or("*")),
+                None => out.push('*'),
+            }
         }
         Some(r) => {
             if flag & 0x900 == 0 {
@@ -286,7 +297,11 @@ pub fn fmt_sam(
             out.push('\t');
             match qual {
                 Some(q) if flag & 0x900 == 0 => {
-                    let qseg = if r.rev { q.iter().rev().copied().collect::<Vec<_>>() } else { q.to_vec() };
+                    let qseg = if r.rev {
+                        q.iter().rev().copied().collect::<Vec<_>>()
+                    } else {
+                        q.to_vec()
+                    };
                     out.push_str(std::str::from_utf8(&qseg).unwrap_or("*"));
                 }
                 Some(_) if flag & 0x100 != 0 => out.push('*'),
@@ -294,7 +309,9 @@ pub fn fmt_sam(
                     // 补充比对：片段 QUAL（反转不互补）
                     let qseg = &q[r.qs as usize..r.qe as usize];
                     if r.rev {
-                        for &b in qseg.iter().rev() { out.push(b as char); }
+                        for &b in qseg.iter().rev() {
+                            out.push(b as char);
+                        }
                     } else {
                         out.push_str(std::str::from_utf8(qseg).unwrap_or("*"));
                     }
@@ -311,7 +328,13 @@ pub fn fmt_sam(
         }
         if let Some(p) = &r.p {
             let nm = r.blen - r.mlen + p.n_ambi as i32;
-            out.push_str(&format!("\tNM:i:{}\tAS:i:{}\tms:i:{}\tmd:i:{}", nm, p.dp_score, p.dp_max0, p.dp_max - p.dp_max2));
+            out.push_str(&format!(
+                "\tNM:i:{}\tAS:i:{}\tms:i:{}\tmd:i:{}",
+                nm,
+                p.dp_score,
+                p.dp_max0,
+                p.dp_max - p.dp_max2
+            ));
             // MC:Z mate CIGAR 与 MQ:i mate MAPQ（r_next 即 mate 的 primary）
             if n_seg > 1 {
                 if let Some(m) = mate {
@@ -329,14 +352,18 @@ pub fn fmt_sam(
             // SA:Z（对应 C 版：parent==id 且有其他 primary hit 时列出其余 primary）
             if r.parent == r.id && hits.len() > 1 {
                 let hi = hit_idx.unwrap();
-                let n_sa = hits.iter().enumerate()
+                let n_sa = hits
+                    .iter()
+                    .enumerate()
                     .filter(|(i, q)| *i != hi && q.parent == q.id && q.p.is_some())
                     .count();
                 if n_sa > 0 {
                     out.push_str("\tSA:Z:");
                     let qlen = seq_raw.len() as i64;
                     for (i, q) in hits.iter().enumerate() {
-                        if i == hi || q.parent != q.id || q.p.is_none() { continue; }
+                        if i == hi || q.parent != q.id || q.p.is_none() {
+                            continue;
+                        }
                         let (qs, qe) = (q.qs as i64, q.qe as i64);
                         let (ts, te) = (q.ts, q.te);
                         let (l_m, l_i, l_d) = if qe - qs < te - ts {
@@ -348,13 +375,32 @@ pub fn fmt_sam(
                         };
                         let clip5 = if q.rev { qlen - qe } else { qs };
                         let clip3 = if q.rev { qs } else { qlen - qe };
-                        out.push_str(&format!("{},{},{},", l2b.ctg[q.tid as usize].name, ts + 1, if q.rev { '-' } else { '+' }));
-                        if clip5 > 0 { out.push_str(&format!("{}S", clip5)); }
-                        if l_m > 0 { out.push_str(&format!("{}M", l_m)); }
-                        if l_i > 0 { out.push_str(&format!("{}I", l_i)); }
-                        if l_d > 0 { out.push_str(&format!("{}D", l_d)); }
-                        if clip3 > 0 { out.push_str(&format!("{}S", clip3)); }
-                        out.push_str(&format!(",{},{};", q.mapq, q.blen - q.mlen + q.p.as_ref().unwrap().n_ambi as i32));
+                        out.push_str(&format!(
+                            "{},{},{},",
+                            l2b.ctg[q.tid as usize].name,
+                            ts + 1,
+                            if q.rev { '-' } else { '+' }
+                        ));
+                        if clip5 > 0 {
+                            out.push_str(&format!("{}S", clip5));
+                        }
+                        if l_m > 0 {
+                            out.push_str(&format!("{}M", l_m));
+                        }
+                        if l_i > 0 {
+                            out.push_str(&format!("{}I", l_i));
+                        }
+                        if l_d > 0 {
+                            out.push_str(&format!("{}D", l_d));
+                        }
+                        if clip3 > 0 {
+                            out.push_str(&format!("{}S", clip3));
+                        }
+                        out.push_str(&format!(
+                            ",{},{};",
+                            q.mapq,
+                            q.blen - q.mlen + q.p.as_ref().unwrap().n_ambi as i32
+                        ));
                     }
                 }
                 // n2:i / XA:Z（对应 C 版 write_tags 后的 xa_max 分支）

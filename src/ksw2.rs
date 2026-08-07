@@ -632,15 +632,7 @@ pub struct LlRst {
 /// 采用 i32 无截断计算：缩放后 match=+1，u8 版在 max_sc < 251 时不会饱和，
 /// i16 版无截断，故本实现与 C 版两条路径等价。
 #[allow(clippy::needless_range_loop)]
-pub fn ll_core(
-    query: &[u8],
-    target: &[u8],
-    m: usize,
-    mat: &[i8],
-    gapo: i32,
-    gape: i32,
-    minsc: i32,
-) -> LlRst {
+pub fn ll_core(query: &[u8], target: &[u8], m: usize, mat: &[i8], gapo: i32, gape: i32, minsc: i32) -> LlRst {
     let (qlen, tlen) = (query.len(), target.len());
     let mut r = LlRst {
         score: 0,

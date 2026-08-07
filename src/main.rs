@@ -235,10 +235,7 @@ fn qname_same(s1: &str, s2: &str) -> bool {
 }
 
 /// 单文件读取：按 qname 分组（相邻同 qname 的两条记录组成 fragment）。
-fn read_batch(
-    iter: &mut minibwa_rust::io::kseq::SeqIter<Box<dyn std::io::Read>>,
-    mb_size: usize,
-) -> Result<Batch> {
+fn read_batch(iter: &mut minibwa_rust::io::kseq::SeqIter<Box<dyn std::io::Read>>, mb_size: usize) -> Result<Batch> {
     let mut seqs = Vec::new();
     let mut frags = Vec::new();
     let mut bp = 0usize;
@@ -340,7 +337,10 @@ fn set_ins_size(opt: &mut minibwa_rust::opt::Opt, arg: &str) {
         _ => (avg_i as f64 * 0.1) as i32,
     };
     let (hi, lo) = match (parts.next(), parts.next()) {
-        (Some(h), Some(l)) => (h.parse::<i64>().unwrap_or(0) as i32, l.parse::<i64>().unwrap_or(0) as i32),
+        (Some(h), Some(l)) => (
+            h.parse::<i64>().unwrap_or(0) as i32,
+            l.parse::<i64>().unwrap_or(0) as i32,
+        ),
         _ => (avg_i + std * 4, avg_i - std * 4),
     };
     opt.pe_avg = avg_i;
@@ -411,16 +411,14 @@ fn run_map(
                 .map(|rec| map_one(opt, &idx, &rec.name, &rec.seq))
                 .collect()
         });
-        let mut seg_hits: Vec<Vec<minibwa_rust::hits::Hit>> =
-            mapped.into_iter().map(|m| m.hits).collect();
+        let mut seg_hits: Vec<Vec<minibwa_rust::hits::Hit>> = mapped.into_iter().map(|m| m.hits).collect();
         let mut n_hit: Vec<i32> = seg_hits.iter().map(|h| h.len() as i32).collect();
 
         // 2. 配对编排（pestat → pair）
         let n_frag = batch.frags.len();
         let n_pe = batch.frags.iter().filter(|f| f.cnt == 2).count();
-        let is_pe = opt.flag & flag::PE != 0
-            && n_frag < batch.seqs.len()
-            && opt.flag & (flag::NO_PAIRING | flag::NO_ALN) == 0;
+        let is_pe =
+            opt.flag & flag::PE != 0 && n_frag < batch.seqs.len() && opt.flag & (flag::NO_PAIRING | flag::NO_ALN) == 0;
         if is_pe {
             let pes: [Pestat; 4] = if opt.flag & flag::PE_PREDEF != 0 || n_pe < 20 {
                 pes_predefined(opt)
@@ -442,10 +440,7 @@ fn run_map(
                     std::mem::take(&mut seg_hits[off]),
                     std::mem::take(&mut seg_hits[off + 1]),
                 ];
-                let qlen2 = [
-                    batch.seqs[off].seq.len() as i32,
-                    batch.seqs[off + 1].seq.len() as i32,
-                ];
+                let qlen2 = [batch.seqs[off].seq.len() as i32, batch.seqs[off + 1].seq.len() as i32];
                 let qseq2 = [batch.seqs[off].seq.clone(), batch.seqs[off + 1].seq.clone()];
                 pair(opt, &idx.l2b, &mut nh, &mut hits2, &pes, &qlen2, &qseq2);
                 n_hit[off] = nh[0];
@@ -546,13 +541,7 @@ fn run_map(
     Ok(())
 }
 
-fn run_fastmap(
-    prefix: &str,
-    reads: &str,
-    min_len: i32,
-    min_occ: i32,
-    max_size_out: u64,
-) -> Result<()> {
+fn run_fastmap(prefix: &str, reads: &str, min_len: i32, min_occ: i32, max_size_out: u64) -> Result<()> {
     use minibwa_rust::bwt::Sai;
     use minibwa_rust::dna::NT4;
     use minibwa_rust::index::Idx;
@@ -792,7 +781,14 @@ fn main() -> Result<()> {
                 set_ins_size(&mut opt, &v);
             }
             opt.n_thread = threads.max(1) as i32;
-            run_map(&reference, &reads1, reads2.as_deref(), &opt, out.as_deref(), rg.as_deref())
+            run_map(
+                &reference,
+                &reads1,
+                reads2.as_deref(),
+                &opt,
+                out.as_deref(),
+                rg.as_deref(),
+            )
         }
         Commands::Version => {
             println!("{VERSION}");

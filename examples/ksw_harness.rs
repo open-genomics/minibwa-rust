@@ -36,13 +36,32 @@ fn main() {
     gen_nt4_mat(&mut mat, a, if b < 0 { -b } else { b }, 0, 1, 0);
     let mut ez = Extz::default();
     ksw_extd2(
-        query.len() as i32, &query, target.len() as i32, &target, 5, &mat,
-        q, e, q2, e2, w, zdrop, end_bonus, flag, &mut ez,
+        query.len() as i32,
+        &query,
+        target.len() as i32,
+        &target,
+        5,
+        &mat,
+        q,
+        e,
+        q2,
+        e2,
+        w,
+        zdrop,
+        end_bonus,
+        flag,
+        &mut ez,
     );
     print!(
         "score={} max={} max_q={} max_t={} mqe={} mqe_t={} zdropped={} reach_end={} cigar=",
-        ez.score, ez.max, ez.max_q, ez.max_t, ez.mqe, ez.mqe_t,
-        i32::from(ez.zdropped), i32::from(ez.reach_end)
+        ez.score,
+        ez.max,
+        ez.max_q,
+        ez.max_t,
+        ez.mqe,
+        ez.mqe_t,
+        i32::from(ez.zdropped),
+        i32::from(ez.reach_end)
     );
     for &c in &ez.cigar {
         print!("{}{}", c >> 4, "MIDN".as_bytes()[(c & 0xf) as usize] as char);

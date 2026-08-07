@@ -67,12 +67,7 @@ pub fn seed_sort_dedup(u: &mut Vec<Sai>) {
     if u.len() <= 1 {
         return;
     }
-    u.sort_by(|a, b| {
-        a.x[0]
-            .cmp(&b.x[0])
-            .then(b.size.cmp(&a.size))
-            .then(a.info.cmp(&b.info))
-    });
+    u.sort_by(|a, b| a.x[0].cmp(&b.x[0]).then(b.size.cmp(&a.size)).then(a.info.cmp(&b.info)));
     u.dedup_by(|a, b| a.x[0] == b.x[0] && a.size == b.size && a.info == b.info);
 }
 
@@ -80,13 +75,7 @@ pub fn seed_sort_dedup(u: &mut Vec<Sai>) {
 ///
 /// 对每个区间解析全部（或均匀采样至 max_occ 个）SA 值，
 /// 换算为 contig 坐标；按拼接坐标排序后去除被包含的短锚点。
-pub fn anchors(
-    l2b: &L2b,
-    bwt: &Bwt,
-    u: &mut Vec<Sai>,
-    qlen: i32,
-    max_occ: i32,
-) -> Vec<Anchor> {
+pub fn anchors(l2b: &L2b, bwt: &Bwt, u: &mut Vec<Sai>, qlen: i32, max_occ: i32) -> Vec<Anchor> {
     let mut v: Vec<Anchor> = Vec::new();
     if u.is_empty() {
         return v;
@@ -244,9 +233,7 @@ mod tests {
         seed_sort_dedup(&mut v);
         // 去重后无三字段全同
         for w in v.windows(2) {
-            assert!(
-                w[0].x[0] != w[1].x[0] || w[0].size != w[1].size || w[0].info != w[1].info
-            );
+            assert!(w[0].x[0] != w[1].x[0] || w[0].size != w[1].size || w[0].info != w[1].info);
         }
     }
 

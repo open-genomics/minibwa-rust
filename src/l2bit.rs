@@ -113,13 +113,19 @@ impl L2b {
             if c & 1 << 3 != 0 {
                 mask_len += 1;
             } else if mask_len > 0 {
-                self.mask.push(Intv { st: x - mask_len, en: x });
+                self.mask.push(Intv {
+                    st: x - mask_len,
+                    en: x,
+                });
                 mask_len = 0;
             }
             if c & 1 << 2 != 0 {
                 ambi_len += 1;
             } else if ambi_len > 0 {
-                self.ambi.push(Intv { st: x - ambi_len, en: x });
+                self.ambi.push(Intv {
+                    st: x - ambi_len,
+                    en: x,
+                });
                 ambi_len = 0;
             }
             self.pac[(x >> 5) as usize] |= ((c & 3) as u64) << ((x & 31) << 1);
@@ -129,15 +135,10 @@ impl L2b {
 
     /// 保存为 `.l2b`（对应 `l2b_save`）。
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let file = File::create(path.as_ref())
-            .with_context(|| format!("无法创建 {}", path.as_ref().display()))?;
+        let file = File::create(path.as_ref()).with_context(|| format!("无法创建 {}", path.as_ref().display()))?;
         let mut w = BufWriter::new(file);
         let len_name: u64 = self.ctg.iter().map(|c| c.name.len() as u64 + 1).sum();
-        let len_comm: u64 = self
-            .ctg
-            .iter()
-            .map(|c| c.comm.as_ref().map_or(1, |s| s.len() as u64 + 1))
-            .sum();
+        let len_comm: u64 = self.ctg.iter().map(|c| c.comm.as_ref().map_or(1, |s| s.len() as u64 + 1)).sum();
         w.write_all(MAGIC)?;
         w.write_all(&0u32.to_le_bytes())?; // dummy
         w.write_all(&(self.ctg.len() as u64).to_le_bytes())?;
@@ -173,10 +174,8 @@ impl L2b {
 
     /// 从 `.l2b` 加载（对应 `l2b_load`）。
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let data = std::fs::read(path.as_ref())
-            .with_context(|| format!("无法读取 {}", path.as_ref().display()))?;
-        Self::from_bytes(&data)
-            .with_context(|| format!("解析 .l2b 失败: {}", path.as_ref().display()))
+        let data = std::fs::read(path.as_ref()).with_context(|| format!("无法读取 {}", path.as_ref().display()))?;
+        Self::from_bytes(&data).with_context(|| format!("解析 .l2b 失败: {}", path.as_ref().display()))
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
@@ -236,17 +235,11 @@ impl L2b {
         let mut p_name = 0usize;
         let mut p_comm = 0usize;
         for c in ctg.iter_mut() {
-            let end = names[p_name..]
-                .iter()
-                .position(|&b| b == 0)
-                .context("名字串未以 NUL 结尾")?;
+            let end = names[p_name..].iter().position(|&b| b == 0).context("名字串未以 NUL 结尾")?;
             c.name = String::from_utf8(names[p_name..p_name + end].to_vec())?;
             p_name += end + 1;
             if comms[p_comm] != 0 {
-                let cend = comms[p_comm..]
-                    .iter()
-                    .position(|&b| b == 0)
-                    .context("注释串未以 NUL 结尾")?;
+                let cend = comms[p_comm..].iter().position(|&b| b == 0).context("注释串未以 NUL 结尾")?;
                 c.comm = Some(String::from_utf8(comms[p_comm..p_comm + cend].to_vec())?);
                 p_comm += cend + 1;
             } else {
@@ -278,11 +271,7 @@ impl L2b {
             return (-2, 0);
         }
         *rev = st >= self.tot_len;
-        let s = if st < self.tot_len {
-            st
-        } else {
-            self.tot_len * 2 - en
-        };
+        let s = if st < self.tot_len { st } else { self.tot_len * 2 - en };
         self.pos2cid(s, en - st)
     }
 

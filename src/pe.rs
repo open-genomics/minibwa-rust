@@ -71,7 +71,8 @@ fn pair_score(h0: &Hit, h1: &Hit, pes: &[Pestat; 4], match_sc: i32) -> f64 {
         let ns = (dist as f64 - pes[dir].avg) / pes[dir].std; // normalized score
         let dp0 = h0.p.as_ref().map_or(h0.score as f64, |p| p.dp_max as f64);
         let dp1 = h1.p.as_ref().map_or(h1.score as f64, |p| p.dp_max as f64);
-        return dp0 + dp1 + 0.721 * (2.0 * libm::erfc(ns.abs() * MB_SQRT1_2)).ln() * match_sc as f64; // .721 = 1/log(4)
+        return dp0 + dp1 + 0.721 * (2.0 * libm::erfc(ns.abs() * MB_SQRT1_2)).ln() * match_sc as f64;
+        // .721 = 1/log(4)
     }
     -1.0
 }
@@ -213,13 +214,7 @@ pub fn pestat(
 
 /// 扫描 proper pairs（对应 `mb_pair_hits`）。返回最优配对信息。
 #[allow(clippy::needless_range_loop)]
-fn pair_hits(
-    opt: &Opt,
-    l2b: &L2b,
-    n_hit: &[i32; 2],
-    hit: &mut [Vec<Hit>; 2],
-    pes: &[Pestat; 4],
-) -> PairAux {
+fn pair_hits(opt: &Opt, l2b: &L2b, n_hit: &[i32; 2], hit: &mut [Vec<Hit>; 2], pes: &[Pestat; 4]) -> PairAux {
     let mut ret = PairAux {
         score: -1,
         sub_sc: -1,
@@ -453,7 +448,12 @@ fn matesw_align(
             h.rescued = true;
             h.qe = qe;
             h.te = te as i64;
-            h.ts = te as i64 - if ez.reach_end { ez.mqe_t as i64 + 1 } else { ez.max_t as i64 + 1 };
+            h.ts = te as i64
+                - if ez.reach_end {
+                    ez.mqe_t as i64 + 1
+                } else {
+                    ez.max_t as i64 + 1
+                };
             h.qs = qe - if ez.reach_end { qe } else { ez.max_q + 1 };
             {
                 let p = h.p.as_mut().unwrap();
@@ -541,8 +541,7 @@ fn matesw_core(
             let mut te2 = te;
             let mut ref_seq = vec![0u8; (te - ts) as usize];
             l2b.getseq(h0.tid, ts, te, &mut ref_seq);
-            let (max_ug, max_i, n_good, n_kmer) =
-                ungap(len, &seq[is_rev as usize], (te - ts) as usize, &ref_seq, 7);
+            let (max_ug, max_i, n_good, n_kmer) = ungap(len, &seq[is_rev as usize], (te - ts) as usize, &ref_seq, 7);
             if max_ug >= 10 && max_ug >= (len as i32) >> 1 && n_good == 1 {
                 ts2 = ts + max_i as i64 - (len as i64) / 2;
                 te2 = ts2 + (len as i64) * 2;
@@ -557,7 +556,16 @@ fn matesw_core(
                 let mut qseq = seq[is_rev as usize][..len].to_vec();
                 let mut tseq = ref_seq[(ts2 - ts) as usize..(te2 - ts) as usize].to_vec();
                 let mut ht = Hit::default();
-                matesw_align(opt, len as i32, &mut qseq, (te2 - ts2) as i32, &mut tseq, &mut ht, min_sc, ez);
+                matesw_align(
+                    opt,
+                    len as i32,
+                    &mut qseq,
+                    (te2 - ts2) as i32,
+                    &mut tseq,
+                    &mut ht,
+                    min_sc,
+                    ez,
+                );
                 if ht.p.is_some() {
                     ht.tid = h0.tid;
                     ht.ts += ts2;
@@ -600,8 +608,8 @@ fn matesw(
             if m >= opt.max_rescue {
                 break;
             }
-            if !h.proper_pair && h.p.as_ref().unwrap().dp_max
-                >= h0[0].p.as_ref().unwrap().dp_max - opt.pen_unpair * opt.a
+            if !h.proper_pair
+                && h.p.as_ref().unwrap().dp_max >= h0[0].p.as_ref().unwrap().dp_max - opt.pen_unpair * opt.a
             {
                 m += 1;
             }
@@ -623,7 +631,10 @@ fn matesw(
             if !h.proper_pair
                 && h.p.as_ref().unwrap().dp_max >= h0[0].p.as_ref().unwrap().dp_max - opt.pen_unpair * opt.a
             {
-                a.push(((h.p.as_ref().unwrap().dp_max as u64) << 32 | h.hash as u64, (i as u64) << 1 | r as u64));
+                a.push((
+                    (h.p.as_ref().unwrap().dp_max as u64) << 32 | h.hash as u64,
+                    (i as u64) << 1 | r as u64,
+                ));
                 m += 1;
             }
         }
@@ -655,7 +666,18 @@ fn matesw(
             continue;
         }
         let h0 = hit[r][j].clone();
-        let found = matesw_core(opt, l2b, pes, &h0, r, qlen[1 - r] as usize, &qs[1 - r], &mut hit[1 - r], min_sc[1 - r], &mut ez);
+        let found = matesw_core(
+            opt,
+            l2b,
+            pes,
+            &h0,
+            r,
+            qlen[1 - r] as usize,
+            &qs[1 - r],
+            &mut hit[1 - r],
+            min_sc[1 - r],
+            &mut ez,
+        );
         if found.is_some() {
             let h1 = hit[1 - r].last().unwrap();
             let sc = pair_score(&h0, h1, pes, opt.a) as i32;

@@ -15,17 +15,17 @@
 //! - [`bwt`] — BWT + 采样后缀数组（`.mbw`），Rank / SMEM / SA 查询
 //! - [`index`] — 索引构建（FASTA → `.l2b` + `.mbw`）
 
+pub mod align;
 pub mod bwt;
+pub mod chain;
 pub mod dna;
+pub mod format;
+pub mod hits;
 pub mod index;
 pub mod io;
-pub mod l2bit;
-pub mod opt;
-pub mod chain;
-pub mod format;
 pub mod ksw2;
-pub mod align;
+pub mod l2bit;
 pub mod mapcore;
-pub mod hits;
-pub mod seed;
+pub mod opt;
 pub mod pe;
+pub mod seed;

@@ -16,11 +16,7 @@ pub fn build(fasta: &str, prefix: &str, seed: u64, sa_bit: u32, threads: usize) 
     if l2b.tot_len == 0 {
         bail!("参考基因组为空: {fasta}");
     }
-    eprintln!(
-        "[M::index] {} 条序列，共 {} bp",
-        l2b.ctg.len(),
-        l2b.tot_len
-    );
+    eprintln!("[M::index] {} 条序列，共 {} bp", l2b.ctg.len(), l2b.tot_len);
     let bwt = bwt_libsais(&l2b, sa_bit, true, threads)?;
     let fn_l2b = format!("{prefix}.l2b");
     let fn_mbw = format!("{prefix}.mbw");

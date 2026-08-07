@@ -3,9 +3,7 @@
 use crate::bwt::Sai;
 use crate::chain::lchain_dp;
 use crate::dna::NT4;
-use crate::hits::{
-    cal_high_cov, gen_hit, query_hash, select_sub, set_mapq, set_parent, Hit,
-};
+use crate::hits::{cal_high_cov, gen_hit, query_hash, select_sub, set_mapq, set_parent, Hit};
 use crate::index::Idx;
 use crate::opt::Opt;
 use crate::seed::{anchor_sort, anchors, seed_intv};

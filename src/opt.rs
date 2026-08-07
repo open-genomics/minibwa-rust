@@ -27,14 +27,14 @@ pub mod flag {
 pub struct Opt {
     pub flag: u64,
     // 种子
-    pub min_len: i32,      // 最小种子长度
-    pub max_sub_occ: i32,  // SMEM 出现次数低于该值时寻找更短种子
-    pub max_occ: i32,      // 区间最大出现次数
+    pub min_len: i32,     // 最小种子长度
+    pub max_sub_occ: i32, // SMEM 出现次数低于该值时寻找更短种子
+    pub max_occ: i32,     // 区间最大出现次数
     // 通用算法
-    pub bw: i32,           // 带宽
+    pub bw: i32, // 带宽
     pub bw_long: i32,
-    pub max_gap: i32,      // 链中断的最大空窗
-    pub max_sr_len: i32,   // adap 模式下超过该长度按长读处理
+    pub max_gap: i32,    // 链中断的最大空窗
+    pub max_sr_len: i32, // adap 模式下超过该长度按长读处理
     // 链化
     pub max_chain_skip: i32,
     pub max_chain_iter: i32,
@@ -46,16 +46,16 @@ pub struct Opt {
     pub pri_ratio: f32,
     pub best_n: i32,
     // 比对打分
-    pub a: i32,            // 匹配
-    pub b: i32,            // 错配
-    pub b_ts: i32,         // 转换错配
-    pub b_ambi: i32,       // 模糊碱基错配
-    pub q: i32,            // 开 gap
-    pub q2: i32,           // 开长 gap
-    pub e: i32,            // 延伸 gap
-    pub e2: i32,           // 延伸长 gap
+    pub a: i32,      // 匹配
+    pub b: i32,      // 错配
+    pub b_ts: i32,   // 转换错配
+    pub b_ambi: i32, // 模糊碱基错配
+    pub q: i32,      // 开 gap
+    pub q2: i32,     // 开长 gap
+    pub e: i32,      // 延伸 gap
+    pub e2: i32,     // 延伸长 gap
     pub end_bonus: i32,
-    pub min_dp_max: i32,   // 最低得分阈值（×a）
+    pub min_dp_max: i32, // 最低得分阈值（×a）
     pub zdrop: i32,
     pub zdrop_inv: i32,
     pub min_ksw_len: i32,
@@ -68,14 +68,14 @@ pub struct Opt {
     pub pe_lo: i32,
     pub pe_hi: i32,
     // I/O
-    pub sb_len: i32,       // 批量 SMEM 的碱基总数
-    pub sb_seq: i32,       // 批量 SMEM 的序列条数
+    pub sb_len: i32, // 批量 SMEM 的碱基总数
+    pub sb_seq: i32, // 批量 SMEM 的序列条数
     pub n_thread: i32,
-    pub out_n: i32,        // 最多输出的次要比对数
+    pub out_n: i32, // 最多输出的次要比对数
     pub out_s: f32,
     pub seed: i32,
     pub xa_max: i32,
-    pub mb_size: i64,      // mini-batch 大小
+    pub mb_size: i64, // mini-batch 大小
     pub max_mb_size: i64,
     pub max_sw_mat: i64,
     pub cap_kalloc: i64,
@@ -186,8 +186,7 @@ impl Opt {
 
     /// 是否为短读模式（对应 `mb_is_sr_mode`）。
     pub fn is_sr_mode(&self, qlen: i32) -> bool {
-        !(self.flag & flag::LONG != 0
-            || (self.flag & flag::ADAP != 0 && qlen > self.max_sr_len))
+        !(self.flag & flag::LONG != 0 || (self.flag & flag::ADAP != 0 && qlen > self.max_sr_len))
     }
 
     /// 对应 `mb_opt_adap()`：按读长自适应调整参数（原地修改副本）。
@@ -199,7 +198,11 @@ impl Opt {
             return opt;
         }
         let a = -(0.5f64.ln()) / (MID_LEN - MIN_LEN);
-        let l = if f64::from(len) > MIN_LEN { f64::from(len) } else { MIN_LEN };
+        let l = if f64::from(len) > MIN_LEN {
+            f64::from(len)
+        } else {
+            MIN_LEN
+        };
         let b = (-a * (l - MIN_LEN)).exp();
         if self.max_gap < 5000 {
             opt.max_gap = (5000.0 - f64::from(5000 - self.max_gap) * b + 0.499) as i32;
@@ -229,8 +232,7 @@ impl Opt {
             opt.min_dp_max = (50.0 - f64::from(50 - self.min_dp_max) * b + 0.499) as i32;
         }
         if self.min_chain_score < 40 {
-            opt.min_chain_score =
-                (40.0 - f64::from(40 - self.min_chain_score) * b + 0.499) as i32;
+            opt.min_chain_score = (40.0 - f64::from(40 - self.min_chain_score) * b + 0.499) as i32;
         }
         opt
     }

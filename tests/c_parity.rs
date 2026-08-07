@@ -48,11 +48,7 @@ fn parity_index(dir: &Path, c: &Path, extra_args: &[&str]) {
     run(&mut cc);
 
     let mut rc = Command::new(rust_bin());
-    rc.arg("index")
-        .args(extra_args)
-        .arg("-t1")
-        .arg(&fa)
-        .arg(dir.join("r"));
+    rc.arg("index").args(extra_args).arg("-t1").arg(&fa).arg(dir.join("r"));
     run(&mut rc);
 
     let c_l2b = std::fs::read(dir.join("c.l2b")).unwrap();
@@ -88,18 +84,10 @@ fn getref_parity() {
     parity_index(&dir, &c, &[]);
 
     // 交叉验证：Rust getref 读 C 建的 .l2b
-    let out = Command::new(rust_bin())
-        .arg("getref")
-        .arg(dir.join("c.l2b"))
-        .output()
-        .unwrap();
+    let out = Command::new(rust_bin()).arg("getref").arg(dir.join("c.l2b")).output().unwrap();
     assert!(out.status.success());
 
-    let c_out = Command::new(&c)
-        .arg("getref")
-        .arg(dir.join("c.l2b"))
-        .output()
-        .unwrap();
+    let c_out = Command::new(&c).arg("getref").arg(dir.join("c.l2b")).output().unwrap();
     assert!(c_out.status.success());
     assert_eq!(c_out.stdout, out.stdout, "getref 输出不一致");
 }
@@ -149,19 +137,36 @@ fn fastmap_parity() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let mut cc = Command::new(&c);
-    cc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("c"));
+    cc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("c"));
     run(&mut cc);
     let mut rc = Command::new(rust_bin());
-    rc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("r"));
+    rc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("r"));
     run(&mut rc);
 
-    for args in [&["-l", "19", "-s", "1", "-w", "20"][..], &["-l", "15", "-s", "2", "-w", "5"][..]] {
+    for args in [
+        &["-l", "19", "-s", "1", "-w", "20"][..],
+        &["-l", "15", "-s", "2", "-w", "5"][..],
+    ] {
         let c_out = Command::new(&c)
-            .arg("fastmap").args(args).arg(dir.join("c")).arg(&reads)
-            .output().unwrap();
+            .arg("fastmap")
+            .args(args)
+            .arg(dir.join("c"))
+            .arg(&reads)
+            .output()
+            .unwrap();
         let r_out = Command::new(rust_bin())
-            .arg("fastmap").args(args).arg(dir.join("r")).arg(&reads)
-            .output().unwrap();
+            .arg("fastmap")
+            .args(args)
+            .arg(dir.join("r"))
+            .arg(&reads)
+            .output()
+            .unwrap();
         assert!(c_out.status.success() && r_out.status.success());
         assert_eq!(c_out.stdout, r_out.stdout, "fastmap 输出不一致 (args={args:?})");
     }
@@ -181,10 +186,16 @@ fn chain_only_paf_parity() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let mut cc = Command::new(&c);
-    cc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("c"));
+    cc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("c"));
     run(&mut cc);
     let mut rc = Command::new(rust_bin());
-    rc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("r"));
+    rc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("r"));
     run(&mut rc);
 
     let cases: &[&[&str]] = &[
@@ -199,13 +210,23 @@ fn chain_only_paf_parity() {
     ];
     for args in cases {
         let c_out = Command::new(&c)
-            .arg("map").arg("--chain-only").arg("-t1").args(*args)
-            .arg(dir.join("c")).arg(&reads)
-            .output().unwrap();
+            .arg("map")
+            .arg("--chain-only")
+            .arg("-t1")
+            .args(*args)
+            .arg(dir.join("c"))
+            .arg(&reads)
+            .output()
+            .unwrap();
         let r_out = Command::new(rust_bin())
-            .arg("map").arg("--chain-only").arg("-t1").args(*args)
-            .arg(dir.join("r")).arg(&reads)
-            .output().unwrap();
+            .arg("map")
+            .arg("--chain-only")
+            .arg("-t1")
+            .args(*args)
+            .arg(dir.join("r"))
+            .arg(&reads)
+            .output()
+            .unwrap();
         assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
         assert_eq!(c_out.stdout, r_out.stdout, "chain-only PAF 不一致 (args={args:?})");
     }
@@ -227,10 +248,16 @@ fn pe_sam_parity() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let mut cc = Command::new(&c);
-    cc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("c"));
+    cc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("c"));
     run(&mut cc);
     let mut rc = Command::new(rust_bin());
-    rc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("r"));
+    rc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("r"));
     run(&mut rc);
 
     // 去 header 后逐行对比（@PG 的 CL 等元数据不同）
@@ -245,13 +272,21 @@ fn pe_sam_parity() {
 
     for args in [&["-t1"][..], &["-t1", "-P"][..], &["-t1", "-5"][..]] {
         let c_out = Command::new(&c)
-            .arg("map").args(args)
-            .arg(dir.join("c")).arg(&r1).arg(&r2)
-            .output().unwrap();
+            .arg("map")
+            .args(args)
+            .arg(dir.join("c"))
+            .arg(&r1)
+            .arg(&r2)
+            .output()
+            .unwrap();
         let r_out = Command::new(rust_bin())
-            .arg("map").args(args)
-            .arg(dir.join("r")).arg(&r1).arg(&r2)
-            .output().unwrap();
+            .arg("map")
+            .args(args)
+            .arg(dir.join("r"))
+            .arg(&r1)
+            .arg(&r2)
+            .output()
+            .unwrap();
         assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
         assert_eq!(
             strip_header(&c_out.stdout),
@@ -276,10 +311,16 @@ fn mem_pe_parity() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let mut cc = Command::new(&c);
-    cc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("c"));
+    cc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("c"));
     run(&mut cc);
     let mut rc = Command::new(rust_bin());
-    rc.arg("index").arg("-t1").arg(mb_dir.join("chrM-human.fa.gz")).arg(dir.join("r"));
+    rc.arg("index")
+        .arg("-t1")
+        .arg(mb_dir.join("chrM-human.fa.gz"))
+        .arg(dir.join("r"));
     run(&mut rc);
 
     let strip_header = |out: &[u8]| -> Vec<String> {
@@ -293,13 +334,21 @@ fn mem_pe_parity() {
 
     for args in [&["-t1"][..], &["-t1", "-I", "300,80,500,100"][..], &["-t1", "-S"][..]] {
         let c_out = Command::new(&c)
-            .arg("mem").args(args)
-            .arg(dir.join("c")).arg(&r1).arg(&r2)
-            .output().unwrap();
+            .arg("mem")
+            .args(args)
+            .arg(dir.join("c"))
+            .arg(&r1)
+            .arg(&r2)
+            .output()
+            .unwrap();
         let r_out = Command::new(rust_bin())
-            .arg("mem").args(args)
-            .arg(dir.join("r")).arg(&r1).arg(&r2)
-            .output().unwrap();
+            .arg("mem")
+            .args(args)
+            .arg(dir.join("r"))
+            .arg(&r1)
+            .arg(&r2)
+            .output()
+            .unwrap();
         assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
         assert_eq!(
             strip_header(&c_out.stdout),

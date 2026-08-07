@@ -96,11 +96,7 @@ fn hit_set_coor(r: &mut Hit, qlen: i32, a: &[Anchor]) {
 
 /// 高覆盖度区间统计（对应 `mb_cal_high_cov`）。
 pub fn cal_high_cov(sai: &[crate::bwt::Sai], max_occ: i32) -> i32 {
-    let mut b: Vec<u64> = sai
-        .iter()
-        .filter(|s| s.size > max_occ as u64)
-        .map(|s| s.info)
-        .collect();
+    let mut b: Vec<u64> = sai.iter().filter(|s| s.size > max_occ as u64).map(|s| s.info).collect();
     if b.is_empty() {
         return 0;
     }
@@ -133,8 +129,8 @@ pub fn gen_hit(hash_seed: u32, qlen: i32, _l2b: &L2b, u: &[u64], a: &[Anchor]) -
     let mut z: Vec<(u64, u64)> = Vec::with_capacity(n_u);
     let mut k = 0usize;
     for &ui in u {
-        let h = hash64(hash64(a[k].tpos as u64).wrapping_add(hash64(a[k].qpos as i64 as u64)) ^ hash_seed as u64)
-            as u32;
+        let h =
+            hash64(hash64(a[k].tpos as u64).wrapping_add(hash64(a[k].qpos as i64 as u64)) ^ hash_seed as u64) as u32;
         z.push((ui ^ h as u64, (k as u64) << 32 | (ui & 0xffff_ffff)));
         k += (ui & 0xffff_ffff) as usize;
     }
@@ -267,7 +263,8 @@ fn update_sub(r: &mut [Hit], i: usize, p: usize, mask_level: f32, mask_len: i32,
         if r[p].subsc < sci {
             r[p].subsc = sci;
         }
-        if r[p].p.is_some() && r[i].p.is_some()
+        if r[p].p.is_some()
+            && r[i].p.is_some()
             && (r[p].tid != r[i].tid || r[p].ts != r[i].ts || r[p].te != r[i].te || ol != min)
         {
             let sci2 = r[i].p.as_ref().unwrap().dp_max;
@@ -332,18 +329,17 @@ pub fn select_sub(pri_ratio: f32, min_diff: i32, best_n: i32, r: &mut Vec<Hit>) 
         let p = r[i].parent as usize;
         if p == i || r[i].inv {
             keep[i] = true;
-        } else if (r[i].score as f32 >= r[p].score as f32 * pri_ratio
-            || r[i].score + min_diff >= r[p].score)
+        } else if (r[i].score as f32 >= r[p].score as f32 * pri_ratio || r[i].score + min_diff >= r[p].score)
             && n_2nd < best_n
             && !(r[i].qs == r[p].qs
                 && r[i].qe == r[p].qe
                 && r[i].tid == r[p].tid
                 && r[i].ts == r[p].ts
                 && r[i].te == r[p].te)
-            {
-                keep[i] = true;
-                n_2nd += 1;
-            }
+        {
+            keep[i] = true;
+            n_2nd += 1;
+        }
     }
     let mut k = 0usize;
     for i in 0..n {
@@ -424,7 +420,11 @@ pub fn set_mapq(qlen: i32, regs: &mut [Hit], min_chain_sc: i32, match_sc: i32, i
         } else {
             10.0 * score as f64 / qlen as f64
         };
-        let subsc = if subsc_raw > min_chain_sc { subsc_raw } else { min_chain_sc };
+        let subsc = if subsc_raw > min_chain_sc {
+            subsc_raw
+        } else {
+            min_chain_sc
+        };
         let mut mapq;
         if let Some((dp_max, dp_max2)) = p_info {
             if dp_max2 > 0 && dp_max > 0 {
@@ -442,7 +442,8 @@ pub fn set_mapq(qlen: i32, regs: &mut [Hit], min_chain_sc: i32, match_sc: i32, i
                 if subsc > score0 {
                     x *= subsc as f64 / score0 as f64;
                 }
-                let mapq_lr = (pen_chn * identity * Q_COEF * (1.0 - x * x) * (dp_max as f64 / match_sc as f64).ln()) as i32;
+                let mapq_lr =
+                    (pen_chn * identity * Q_COEF * (1.0 - x * x) * (dp_max as f64 / match_sc as f64).ln()) as i32;
                 mapq = if is_sr {
                     mapq_sr
                 } else if max_sr_len < 0 {
@@ -450,8 +451,7 @@ pub fn set_mapq(qlen: i32, regs: &mut [Hit], min_chain_sc: i32, match_sc: i32, i
                 } else if qlen < max_sr_len {
                     mapq_sr
                 } else {
-                    (mapq_lr as f64
-                        - (mapq_lr - mapq_sr) as f64 * 2.0f64.powf(1.0 - qlen as f64 / max_sr_len as f64)
+                    (mapq_lr as f64 - (mapq_lr - mapq_sr) as f64 * 2.0f64.powf(1.0 - qlen as f64 / max_sr_len as f64)
                         + 0.499) as i32
                 };
             } else {

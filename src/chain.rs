@@ -211,8 +211,7 @@ pub fn lchain_dp(
             max_f
         };
         if max_ii < 0
-            || (a[i].tpos - a[max_ii as usize].tpos <= max_dist_x as i64 + a[i].len as i64
-                && f[max_ii as usize] < f[i])
+            || (a[i].tpos - a[max_ii as usize].tpos <= max_dist_x as i64 + a[i].len as i64 && f[max_ii as usize] < f[i])
         {
             max_ii = i as i64;
         }

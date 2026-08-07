@@ -80,9 +80,7 @@ impl<R: Read> SeqIter<R> {
         };
 
         let mut rec = SeqRecord::default();
-        let ws = header
-            .iter()
-            .position(|&b| matches!(b, b' ' | b'\t' | 0x0b | 0x0c | b'\r'));
+        let ws = header.iter().position(|&b| matches!(b, b' ' | b'\t' | 0x0b | 0x0c | b'\r'));
         let (name_b, comment_b) = match ws {
             Some(i) => (&header[..i], Some(&header[i + 1..])),
             None => (&header[..], None),

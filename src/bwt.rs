@@ -132,17 +132,13 @@ impl Bwt {
     /// 取 $-removed BWT 串第 k 位碱基（对应 `bwt_B0`）。
     #[inline]
     fn b0(&self, k: u64) -> u8 {
-        ((self.data[((k >> 7) << 3) as usize + 4 + (((k & 127) >> 5) as usize)]
-            >> ((k & 31) << 1))
-            & 3) as u8
+        ((self.data[((k >> 7) << 3) as usize + 4 + (((k & 127) >> 5) as usize)] >> ((k & 31) << 1)) & 3) as u8
     }
 
     #[inline]
     fn rank_aux1(y: u64, c: u8) -> u64 {
         // 将核苷酸计数归约为位计数（对应 rank_aux1）
-        let y = (((if c & 2 != 0 { y } else { !y }) >> 1)
-            & (if c & 1 != 0 { y } else { !y }))
-            & 0x5555_5555_5555_5555;
+        let y = (((if c & 2 != 0 { y } else { !y }) >> 1) & (if c & 1 != 0 { y } else { !y })) & 0x5555_5555_5555_5555;
         y.count_ones() as u64
     }
 
@@ -172,8 +168,7 @@ impl Bwt {
             0
         };
         let block = ((k >> 7) << 3) as usize;
-        let mut n = (self.data[block + c as usize] & CNT_MASK)
-            + ((self.data[block + c as usize] >> CNT_SHIFT) & mask);
+        let mut n = (self.data[block + c as usize] & CNT_MASK) + ((self.data[block + c as usize] >> CNT_SHIFT) & mask);
         let mut p = block + 4 + if k & 0x7f >= 64 { 2 } else { 0 };
         let end = block + 4 + ((k & 0x7f) >> 5) as usize;
         if p < end {
@@ -204,15 +199,11 @@ impl Bwt {
             0
         };
         for (j, cnt_j) in cnt.iter_mut().enumerate() {
-            *cnt_j =
-                (self.data[block + j] & CNT_MASK) + ((self.data[block + j] >> CNT_SHIFT) & mask);
+            *cnt_j = (self.data[block + j] & CNT_MASK) + ((self.data[block + j] >> CNT_SHIFT) & mask);
         }
         // 块内 2-bit 数据按 u32 计（小端）
         let data32 = &self.data[block + 4..];
-        let data32: Vec<u32> = data32
-            .iter()
-            .flat_map(|&w| [w as u32, (w >> 32) as u32])
-            .collect();
+        let data32: Vec<u32> = data32.iter().flat_map(|&w| [w as u32, (w >> 32) as u32]).collect();
         let mut q = if k & 0x7f >= 64 { 4 } else { 0 };
         let end = ((k & 0x7f) >> 4) as usize;
         let mut x = 0u32;
@@ -254,8 +245,7 @@ impl Bwt {
                 0
             };
             for (j, cntk_j) in cntk.iter_mut().enumerate() {
-                *cntk_j = (self.data[block + j] & CNT_MASK)
-                    + ((self.data[block + j] >> CNT_SHIFT) & mask);
+                *cntk_j = (self.data[block + j] & CNT_MASK) + ((self.data[block + j] >> CNT_SHIFT) & mask);
             }
             let data32: Vec<u32> = self.data[block + 4..block + 8]
                 .iter()
@@ -365,8 +355,7 @@ impl Bwt {
 
     /// 保存为 `.mbw`（对应 `mb_bwt_save`）。
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let file = File::create(path.as_ref())
-            .with_context(|| format!("无法创建 {}", path.as_ref().display()))?;
+        let file = File::create(path.as_ref()).with_context(|| format!("无法创建 {}", path.as_ref().display()))?;
         let mut w = BufWriter::new(file);
         w.write_all(MAGIC)?;
         w.write_all(&self.sa_bit.to_le_bytes())?;
@@ -390,8 +379,7 @@ impl Bwt {
 
     /// 从 `.mbw` 加载（对应 `mb_bwt_load`）。
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let data = std::fs::read(path.as_ref())
-            .with_context(|| format!("无法读取 {}", path.as_ref().display()))?;
+        let data = std::fs::read(path.as_ref()).with_context(|| format!("无法读取 {}", path.as_ref().display()))?;
         let mut r = super::l2bit::Cursor::new(&data);
         if r.take(4)? != MAGIC {
             bail!("magic 不匹配（期望 MBW\\2）: {}", path.as_ref().display());
