@@ -35,7 +35,7 @@ pub fn reset_extz(ez: &mut Extz) {
         max_q: -1, max_t: -1, mqe_t: -1, mte_q: -1, ..Default::default() };
 }
 
-fn push_cigar(c: &mut Vec<u32>, op: u32, len: u32) {
+pub fn push_cigar_vec(c: &mut Vec<u32>, op: u32, len: u32) {
     if let Some(l) = c.last_mut() { if *l & 0xf == op { *l += len << 4; return; } }
     c.push(len << 4 | op);
 }
@@ -60,13 +60,13 @@ fn backtrack(is_rev: bool, p: &[Vec<u8>], i0: i32, j0: i32, cigar: &mut Vec<u32>
         else if tmp >> (state + 2) & 1 == 0 { state = 0; }
         if state == 0 { state = tmp & 7; }
         match state {
-            0 => { push_cigar(cigar, CIGAR_MATCH, 1); i -= 1; j -= 1; }
-            1 | 3 => { push_cigar(cigar, CIGAR_DEL, 1); j -= 1; }
-            _ => { push_cigar(cigar, CIGAR_INS, 1); i -= 1; }
+            0 => { push_cigar_vec(cigar, CIGAR_MATCH, 1); i -= 1; j -= 1; }
+            1 | 3 => { push_cigar_vec(cigar, CIGAR_DEL, 1); j -= 1; }
+            _ => { push_cigar_vec(cigar, CIGAR_INS, 1); i -= 1; }
         }
     }
-    if i >= 0 { push_cigar(cigar, CIGAR_INS, (i + 1) as u32); }
-    if j >= 0 { push_cigar(cigar, CIGAR_DEL, (j + 1) as u32); }
+    if i >= 0 { push_cigar_vec(cigar, CIGAR_INS, (i + 1) as u32); }
+    if j >= 0 { push_cigar_vec(cigar, CIGAR_DEL, (j + 1) as u32); }
     if !is_rev { cigar.reverse(); }
 }
 

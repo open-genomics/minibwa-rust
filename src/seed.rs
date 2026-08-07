@@ -4,6 +4,9 @@ use crate::bwt::{Bwt, Sai};
 use crate::l2bit::L2b;
 
 /// 锚点（对应 `mb_anchor_t`）。
+pub const SEED_LONG_JOIN: u32 = 0x1;
+pub const SEED_IGNORE: u32 = 0x2;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Anchor {
     /// tid<<1 | rev
@@ -15,6 +18,7 @@ pub struct Anchor {
     /// 目标坐标（contig 内）
     pub tpos: i64,
     pub flt: bool,
+    pub flag: u32,
 }
 
 /// 两轮 SMEM（对应 `mb_seed_intv` 的单序列版）。
@@ -137,6 +141,7 @@ pub fn anchors(
                     qpos: if rev { qlen - 1 - qs } else { qs + len - 1 },
                     tpos: (ctg.off * 2 + ctg.len * rev as u64) as i64 + cst + (len - 1) as i64,
                     flt: false,
+                    flag: 0,
                 });
             }
         }

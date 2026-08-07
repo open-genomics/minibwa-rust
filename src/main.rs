@@ -157,9 +157,7 @@ fn run_map(
     if reads2.is_some() {
         anyhow::bail!("配对端比对将在 M6 里程碑交付");
     }
-    if opt.flag & minibwa_rust::opt::flag::PAF == 0 {
-        anyhow::bail!("SAM 输出将在 M5 里程碑交付（当前可用 --chain-only/-f 输出 PAF）");
-    }
+    // SAM 和 PAF 均已支持
     let idx = Idx::load(reference)?;
 
     let reader = open_fasta(reads1)?;
@@ -167,6 +165,12 @@ fn run_map(
         Some(p) => Box::new(std::io::BufWriter::new(std::fs::File::create(p)?)),
         None => Box::new(std::io::BufWriter::new(std::io::stdout())),
     };
+
+    let is_paf = opt.flag & minibwa_rust::opt::flag::PAF != 0;
+    if !is_paf {
+        let hdr = minibwa_rust::format::fmt_sam_hdr(&idx.l2b, env!("CARGO_PKG_VERSION"));
+        out.write_all(hdr.as_bytes())?;
+    }
 
     // 按 mb_size 碱基为一批，rayon 并行处理（保持输入顺序输出）
     let pool = rayon::ThreadPoolBuilder::new()
@@ -201,26 +205,43 @@ fn run_map(
             .map(|(name, seq)| {
                 let res = map_one(opt, &idx, name, seq);
                 let mut s = String::new();
-                if res.hits.is_empty() {
-                    if opt.flag & minibwa_rust::opt::flag::NO_UNMAP == 0 {
-                        fmt_paf(&mut s, &idx.l2b, name, seq.len(), None, 1, 0);
+                if is_paf {
+                    if res.hits.is_empty() {
+                        if opt.flag & minibwa_rust::opt::flag::NO_UNMAP == 0 {
+                            fmt_paf(&mut s, &idx.l2b, name, seq.len(), None, 1, 0);
+                        }
+                    } else {
+                        let mut n_sec = 0i32;
+                        for h in &res.hits {
+                            let is_pri = h.parent == h.id;
+                            if !is_pri && n_sec >= opt.out_n { continue; }
+                            if !is_pri {
+                                let p = &res.hits[h.parent as usize];
+                                if (h.score as f64) < opt.out_s as f64 * p.score as f64 { continue; }
+                            }
+                            fmt_paf(&mut s, &idx.l2b, name, seq.len(), Some(h), 1, 0);
+                            if !is_pri { n_sec += 1; }
+                        }
                     }
                 } else {
-                    let mut n_sec = 0i32;
-                    for h in &res.hits {
-                        let is_pri = h.parent == h.id;
-                        if !is_pri && n_sec >= opt.out_n {
-                            continue;
+                    // SAM
+                    if res.hits.is_empty() {
+                        if opt.flag & minibwa_rust::opt::flag::NO_UNMAP == 0 {
+                            minibwa_rust::format::fmt_sam(&mut s, &idx.l2b, name, seq, None, None);
                         }
-                        if !is_pri {
-                            let p = &res.hits[h.parent as usize];
-                            if (h.score as f64) < opt.out_s as f64 * p.score as f64 {
-                                continue;
+                    } else {
+                        let mut n_sec = 0i32;
+                        for h in &res.hits {
+                            let is_pri = h.parent == h.id;
+                            if !is_pri && n_sec >= opt.out_n { continue; }
+                            if !is_pri {
+                                let p = &res.hits[h.parent as usize];
+                                let p_score = p.p.as_ref().map_or(p.score, |pp| pp.dp_max);
+                                let h_score = h.p.as_ref().map_or(h.score, |pp| pp.dp_max);
+                                if (h_score as f64) < opt.out_s as f64 * p_score as f64 { continue; }
                             }
-                        }
-                        fmt_paf(&mut s, &idx.l2b, name, seq.len(), Some(h), 1, 0);
-                        if !is_pri {
-                            n_sec += 1;
+                            minibwa_rust::format::fmt_sam(&mut s, &idx.l2b, name, seq, None, Some(h));
+                            if !is_pri { n_sec += 1; }
                         }
                     }
                 }

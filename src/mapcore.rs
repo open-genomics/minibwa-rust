@@ -28,7 +28,7 @@ pub fn map_one(opt: &Opt, idx: &Idx, qname: &str, seq0: &[u8]) -> MapOut {
 }
 
 /// 对应 `mb_map_sai`。当前实现 NO_ALN 路径（链级），M5 接入碱基比对。
-fn map_sai(opt: &Opt, idx: &Idx, qlen: i32, qname: &str, _seq: &[u8], mut u: Vec<Sai>) -> MapOut {
+fn map_sai(opt: &Opt, idx: &Idx, qlen: i32, qname: &str, seq: &[u8], mut u: Vec<Sai>) -> MapOut {
     const MIN_RECHAIN_LEN: i64 = 1000;
     const MIN_RECHAIN_RATIO: f64 = 0.1;
     let mut out = MapOut::default();
@@ -103,7 +103,14 @@ fn map_sai(opt: &Opt, idx: &Idx, qlen: i32, qname: &str, _seq: &[u8], mut u: Vec
     set_parent(opt.mask_level, opt.mask_len, &mut hit, sub_diff, false);
     select_sub(opt.pri_ratio, opt.min_len * 2, opt.best_n, &mut hit);
 
-    // M5 在此接入 mb_align_skeleton（NO_ALN 时跳过）
+    // 碱基级比对
+    if opt.flag & crate::opt::flag::NO_ALN == 0 {
+        crate::align::align_skeleton(opt, idx, qlen, seq, &mut hit, &mut a);
+        let sub_diff = (opt.a + opt.b).max(opt.q + opt.e);
+        crate::hits::set_parent(opt.mask_level, opt.mask_len, &mut hit, sub_diff, false);
+        crate::hits::select_sub(opt.pri_ratio, opt.min_len * 2, opt.best_n, &mut hit);
+        crate::hits::set_sam_pri(&mut hit, opt.flag & crate::opt::flag::PRIMARY5 != 0);
+    }
 
     let frac_high = (255.0 * hi_cov as f64 / qlen as f64) as u8;
     let mut seed_ratio8 = (255.0 * out.seed_ratio + 0.499) as u8;
