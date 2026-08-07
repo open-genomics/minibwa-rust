@@ -477,6 +477,20 @@ fn hit_set_coor(r: &mut Hit, qlen: i32, a: &[Anchor]) {
     r.mlen = mlen; r.blen = blen;
 }
 
+/// 计算 CIGAR 消耗的 query/target 长度。
+fn cigar_lens(cigar: &[u32]) -> (i32, i64) {
+    let mut q = 0i32; let mut t = 0i64;
+    for &c in cigar {
+        match c & 0xf {
+            0 | 7 | 8 => { let l = (c >> 4) as i32; q += l; t += l as i64; }
+            1 => { q += (c >> 4) as i32; }
+            2 | 3 => { t += (c >> 4) as i64; }
+            _ => {}
+        }
+    }
+    (q, t)
+}
+
 /// 核心：单 hit 骨对比对（对应 `mb_align1`）。
 fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &mut Hit, a: &mut [Anchor]) {
     let is_sr = opt.is_sr_mode(qlen);
@@ -512,7 +526,7 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
     let (mut ts0, mut qs0, mut te0, mut qe0);
     if is_sr {
         qs0 = 0; qe0 = qlen;
-        let mut l = ts as i64;
+        let mut l = qs as i64;
         l += if l * (opt.a as i64 + opt.end_bonus as i64) > (opt.q as i64) { (l * opt.a as i64 + opt.end_bonus as i64 - opt.q as i64) / opt.e as i64 } else { 0 };
         ts0 = (ts - l).max(0);
         let l = (qlen - qe) as i64;
@@ -577,12 +591,13 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
     }
     te1 = ts1; qe1 = qs1;
 
-    // 首个锚点的精确匹配
+    // 首个锚点的精确匹配（C 版用 te-ts，不是 te-ts1）
     {
         te1 = a[as1 as usize].tpos + 1 - min_int(a[as1 as usize].len >> 1, max_back) as i64;
         qe1 = a[as1 as usize].qpos + 1 - min_int(a[as1 as usize].len >> 1, max_back);
-        ksw2::push_cigar_vec(&mut r.p.as_mut().unwrap().cigar, CIGAR_MATCH, (te1 - ts1) as u32);
-        r.p.as_mut().unwrap().dp_score += opt.a * (te1 - ts1) as i32;
+        let match_len = (te1 - ts) as u32;
+        ksw2::push_cigar_vec(&mut r.p.as_mut().unwrap().cigar, CIGAR_MATCH, match_len);
+        r.p.as_mut().unwrap().dp_score += opt.a * match_len as i32;
     }
     let (mut ts_cur, mut qs_cur) = (te1, qe1);
 
@@ -653,12 +668,18 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
         idx.l2b.getseq(tid, ts_cur, te0, &mut tseq);
         align_pair(opt, qe0 - qs_cur, &qseg, (te0 - ts_cur) as i32, &tseq[..(te0 - ts_cur) as usize],
                    &mat, bw, opt.end_bonus, opt.zdrop, kf::EXTZ_ONLY, &mut ez);
+        // 检查 CIGAR 是否覆盖了完整查询长度
+        let cigar_q: i32 = ez.cigar.iter().map(|c| {
+            let op = c & 0xf; let len = (c >> 4) as i32;
+            if op == CIGAR_MATCH || op == CIGAR_INS || op == 7 || op == 8 { len } else { 0 }
+        }).sum();
+        let force_end = cigar_q == qe0 - qs_cur;
         if !ez.cigar.is_empty() {
             for &c in &ez.cigar { ksw2::push_cigar_vec(&mut r.p.as_mut().unwrap().cigar, c & 0xf, c >> 4); }
-            r.p.as_mut().unwrap().dp_score += if ez.reach_end { ez.mqe } else { ez.max };
+            r.p.as_mut().unwrap().dp_score += if ez.reach_end || force_end { ez.mqe.max(ez.score) } else { ez.max };
         }
-        te1 = ts_cur + (if ez.reach_end { ez.mqe_t + 1 } else { ez.max_t + 1 }) as i64;
-        qe1 = qs_cur + (if ez.reach_end { qe0 - qs_cur } else { ez.max_q + 1 });
+        te1 = ts_cur + (if ez.reach_end || force_end { (te0 - ts_cur) } else { (ez.max_t + 1) as i64 }) as i64;
+        qe1 = qs_cur + (if ez.reach_end || force_end { qe0 - qs_cur } else { ez.max_q + 1 });
     }
 
     r.ts = ts1; r.te = te1;
@@ -666,9 +687,28 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
     else { r.qs = qlen - qe1; r.qe = qlen - qs1; }
 
     if r.p.is_some() {
-        idx.l2b.getseq(tid, ts1, te1, &mut tseq);
-        let qseq = &qseq0[rev as usize][qs1 as usize..qe1 as usize];
-        update_extra(r, qseq, &tseq[..(te1 - ts1) as usize], &mat, opt.q as i8, opt.e as i8, opt.flag, !is_sr);
+        // 同步坐标与 CIGAR：确保 qe-qs == CIGAR query 消耗, te-ts == CIGAR target 消耗
+        let (cq, ct) = cigar_lens(&r.p.as_ref().unwrap().cigar);
+        let ctg_len = idx.l2b.ctg[tid as usize].len as i64;
+        if !rev {
+            r.qs = qs1.max(0);
+            r.qe = (r.qs + cq).min(qlen);
+        } else {
+            r.qe = (qlen - qs1.max(0)).min(qlen);
+            r.qs = (r.qe - cq).max(0);
+        }
+        r.ts = ts1.max(0);
+        r.te = (r.ts + ct).min(ctg_len);
+        let qe_use = if !rev { r.qe } else { qlen - r.qs };
+        let qs_use = if !rev { r.qs } else { qlen - r.qe };
+        if qs_use >= 0 && qe_use > qs_use && qe_use <= qlen && r.te > r.ts {
+            idx.l2b.getseq(tid, r.ts, r.te, &mut tseq);
+            let qseq = &qseq0[rev as usize][qs_use as usize..qe_use as usize];
+            let tlen_aln = (r.te - r.ts) as usize;
+            if tlen_aln <= tseq.len() && qseq.len() == cq as usize {
+                update_extra(r, qseq, &tseq[..tlen_aln], &mat, opt.q as i8, opt.e as i8, opt.flag, !is_sr);
+            }
+        }
     }
 }
 
@@ -703,8 +743,16 @@ pub fn align_skeleton(opt: &Opt, idx: &Idx, qlen: i32, seq: &[u8], hits: &mut Ve
     let mut i = 0usize;
     while i < n_regs {
         let mut r2 = Hit::default();
-        // 需要 split borrow: 先取 hits[i] 的可变引用
         align1(opt, idx, qlen, &qseq0, &mut hits[i], &mut r2, a);
+        if std::env::var("MB_DEBUG_ALIGN").is_ok() {
+            if let Some(p) = &hits[i].p {
+                let cig: String = p.cigar.iter()
+                    .map(|c| format!("{}{}", c>>4, CIGAR_STR[(c&0xf) as usize] as char))
+                    .collect();
+                eprintln!("DBG hit{} qs={} qe={} ts={} te={} cigar={} cnt={}",
+                    i, hits[i].qs, hits[i].qe, hits[i].ts, hits[i].te, cig, hits[i].cnt);
+            }
+        }
         if r2.cnt > 0 {
             hits.insert(i + 1, r2);
         }
