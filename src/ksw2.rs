@@ -614,26 +614,67 @@ pub fn ksw_extd2(
     );
 }
 
-pub fn ll_local(query: &[u8], target: &[u8], m: usize, mat: &[i8], gapo: i32, gape: i32) -> i32 {
+/// 线性空间局部比对结果（对应 `ksw_llrst_t`）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LlRst {
+    pub score: i32,
+    pub te: i32,
+    pub qe: i32,
+    pub score2: i32,
+    pub te2: i32,
+}
+
+/// 线性空间局部比对打分（对应 `ksw_ll_u8_core` / `ksw_ll_i16_core` 的标量版）。
+///
+/// 语义与 C 版一致：维护 H/E/F 三状态，记录每行最大值与达到全局最大时的 H 行
+/// （Hmax），据此给出 te（target 端）与 qe（query 端）；`minsc` 对应 xtra 低 16 位
+/// （`KSW_LL_SUBO | opt->min_len`），用于记录高分区段并计算次优分 score2。
+/// 采用 i32 无截断计算：缩放后 match=+1，u8 版在 max_sc < 251 时不会饱和，
+/// i16 版无截断，故本实现与 C 版两条路径等价。
+#[allow(clippy::needless_range_loop)]
+pub fn ll_core(
+    query: &[u8],
+    target: &[u8],
+    m: usize,
+    mat: &[i8],
+    gapo: i32,
+    gape: i32,
+    minsc: i32,
+) -> LlRst {
     let (qlen, tlen) = (query.len(), target.len());
+    let mut r = LlRst {
+        score: 0,
+        te: -1,
+        qe: -1,
+        score2: -1,
+        te2: -1,
+    };
     if qlen == 0 || tlen == 0 {
-        return 0;
+        return r;
     }
-    let mut h = vec![0i32; qlen + 1];
-    let mut er = vec![NEG_INF; qlen + 1];
-    let mut best = 0i32;
-    for j in 1..=tlen {
-        let tj = target[j - 1] as usize;
-        let mut f = NEG_INF;
-        let mut hd = 0i32;
-        for i in 1..=qlen {
-            let s = mat[tj * m + query[i - 1] as usize] as i32;
-            let hp = h[i];
-            er[i] = (er[i] - gape).max(hd - gapo - gape);
-            f = (f - gape).max(hp - gapo - gape);
+    let mut mat_max = 0i32;
+    for &v in mat.iter().take(m * m) {
+        if (v as i32) > mat_max {
+            mat_max = v as i32;
+        }
+    }
+    let mut h = vec![0i32; qlen + 1]; // H(i-1, ·)；h[j+1] 对应 query 位置 j
+    let mut e = vec![0i32; qlen + 1]; // E(i, ·)（插入状态）
+    let mut hmax: Vec<i32> = vec![0; qlen]; // 全局最大行 H(i, ·)，索引即 query 位置
+    let mut gmax = 0i32;
+    let mut te = -1i32;
+    let mut b: Vec<u64> = Vec::new(); // 高 32 位：行最大分；低 32 位：行号
+    for i in 0..tlen {
+        let tj = target[i] as usize;
+        let mut f = 0i32; // F(i, j)（删除状态），每行重置
+        let mut imax = 0i32;
+        let mut hd = 0i32; // H(i-1, j-1)
+        for j in 0..qlen {
+            let hp = h[j + 1]; // H(i-1, j)
+            let s = mat[tj * m + query[j] as usize] as i32;
             let mut hh = hd + s;
-            if er[i] > hh {
-                hh = er[i];
+            if e[j + 1] > hh {
+                hh = e[j + 1];
             }
             if f > hh {
                 hh = f;
@@ -641,12 +682,58 @@ pub fn ll_local(query: &[u8], target: &[u8], m: usize, mat: &[i8], gapo: i32, ga
             if hh < 0 {
                 hh = 0;
             }
-            h[i] = hh;
-            if hh > best {
-                best = hh;
+            h[j + 1] = hh;
+            e[j + 1] = (e[j + 1] - gape).max(hh - gapo - gape);
+            f = (f - gape).max(hh - gapo - gape);
+            if hh > imax {
+                imax = hh;
             }
             hd = hp;
         }
+        if imax >= minsc {
+            if b.is_empty() || (b.last().unwrap() & 0xffff_ffff) as i64 + 1 != i as i64 {
+                b.push((imax as u64) << 32 | i as u64);
+            } else if (b.last().unwrap() >> 32) < imax as u64 {
+                *b.last_mut().unwrap() = (imax as u64) << 32 | i as u64;
+            }
+        }
+        if imax > gmax {
+            gmax = imax;
+            te = i as i32;
+            hmax.copy_from_slice(&h[1..]);
+        }
     }
-    best
+    r.score = gmax;
+    r.te = te;
+    // qe：gmax 行的 H 最大值所在 query 位置（对应 C 遍历 Hmax）
+    let mut max = -1i32;
+    for (i, &v) in hmax.iter().enumerate() {
+        let ii = i as i32;
+        if v > max {
+            max = v;
+            r.qe = ii;
+        } else if v == max && ii < r.qe {
+            r.qe = ii;
+        }
+    }
+    // score2：离 te 窗口外最大的区段分（窗口宽度用 max(mat)，对应 C 版 q->max）
+    if !b.is_empty() {
+        let w = if mat_max > 0 { (gmax + mat_max - 1) / mat_max } else { 0 };
+        let low = te - w;
+        let high = te + w;
+        for &bv in &b {
+            let e2 = (bv & 0xffff_ffff) as i32;
+            if (e2 < low || e2 > high) && (bv >> 32) as i32 > r.score2 {
+                r.score2 = (bv >> 32) as i32;
+                r.te2 = e2;
+            }
+        }
+    }
+    r
+}
+
+/// 纯分数版线性空间局部比对（只取最优分）。
+pub fn ll_local(query: &[u8], target: &[u8], m: usize, mat: &[i8], gapo: i32, gape: i32) -> i32 {
+    // xtra=0 → minsc=0x10000，b[] 永不记录，仅返回最优分
+    ll_core(query, target, m, mat, gapo, gape, 0x10000).score
 }

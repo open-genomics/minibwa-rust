@@ -28,3 +28,4 @@ pub mod align;
 pub mod mapcore;
 pub mod hits;
 pub mod seed;
+pub mod pe;

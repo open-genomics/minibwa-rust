@@ -323,7 +323,8 @@ fn fix_cigar(r: &mut Hit, qseq: &[u8], tseq: &[u8]) -> (i32, i32) {
 }
 
 /// 计算 mlen/blen/n_ambi/dp_max，处理 EQX 和 tag（对应 `mb_update_extra`）。
-fn update_extra(r: &mut Hit, qseq: &[u8], tseq: &[u8], mat: &[i8; 25], q: i8, e: i8, opt_flag: u64, log_gap: bool) {
+pub(crate) fn update_extra(r: &mut Hit, qseq: &[u8], tseq: &[u8], mat: &[i8; 25], q: i8, e: i8, opt_flag: u64, log_gap: bool) {
+    let (qseq_full, tseq_full) = (qseq, tseq); // MD 需要未截断的完整序列
     let (qshift, tshift) = fix_cigar(r, qseq, tseq);
     let qseq = &qseq[qshift as usize..];
     let tseq = &tseq[tshift as usize..];
@@ -375,6 +376,60 @@ fn update_extra(r: &mut Hit, qseq: &[u8], tseq: &[u8], mat: &[i8; 25], q: i8, e:
     p_ref.dp_max0 = (mx + 0.499) as i32;
     p_ref.dp_max = p_ref.dp_max0;
     if opt_flag & of::EQX != 0 { update_cigar_eqx(r, qseq, tseq); }
+    // cs/ds/MD 标签（对应 C 版 mb_update_extra 尾部；Rust 仅实现 MD）
+    let md = if opt_flag & (of::WRITE_DS | of::WRITE_CS | of::WRITE_MD) != 0
+        && opt_flag & (of::WRITE_DS | of::WRITE_CS) == 0
+    {
+        Some(write_md(tseq_full, qseq_full, r))
+    } else {
+        None
+    };
+    if let Some(md) = md {
+        r.p.as_mut().unwrap().cs = Some(md);
+    }
+}
+
+/// 生成 MD:Z 标签（对应 `mb_write_MD`）。qseq/tseq 为 nt4 编码。
+fn write_md(tseq: &[u8], qseq: &[u8], r: &Hit) -> String {
+    let p = r.p.as_ref().unwrap();
+    let mut s = String::from("MD:Z:");
+    let mut q_off = 0i32;
+    let mut t_off = 0i32;
+    let mut l_md = 0i32;
+    for &c in &p.cigar {
+        let op = c & 0xf;
+        let len = (c >> 4) as i32;
+        if op == CIGAR_MATCH || op == 7 || op == 8 {
+            // MATCH / = / X
+            for j in 0..len {
+                let (cq, ct) = (qseq[(q_off + j) as usize], tseq[(t_off + j) as usize]);
+                if cq != ct {
+                    s.push_str(&format!("{}{}", l_md, b"ACGTN"[ct as usize] as char));
+                    l_md = 0;
+                } else {
+                    l_md += 1;
+                }
+            }
+            q_off += len;
+            t_off += len;
+        } else if op == CIGAR_INS {
+            q_off += len;
+        } else if op == CIGAR_DEL {
+            let mut tmp = String::new();
+            for j in 0..len {
+                tmp.push(b"ACGTN"[tseq[(t_off + j) as usize] as usize] as char);
+            }
+            s.push_str(&format!("{}^{}", l_md, tmp));
+            l_md = 0;
+            t_off += len;
+        } else if op == 3 {
+            t_off += len; // N_SKIP
+        }
+    }
+    if l_md > 0 {
+        s.push_str(&l_md.to_string());
+    }
+    s
 }
 
 fn update_cigar_eqx(r: &mut Hit, qseq: &[u8], tseq: &[u8]) {

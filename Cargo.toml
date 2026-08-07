@@ -17,6 +17,8 @@ rayon = "1.12.0"
 libsais-rs = "0.2.2"
 # .fa.gz 透明读取（对应 C 版 minibwa 的 zlib 依赖）
 flate2 = "1"
+# erfc（配对端 rescue 的 insert size 高斯惩罚打分）
+libm = "0.2"
 
 # jemalloc：替换默认 allocator，多线程场景显著提升
 # 仅在非 Windows 平台启用（Linux glibc/musl + macOS）
