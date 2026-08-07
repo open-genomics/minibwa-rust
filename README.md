@@ -16,14 +16,15 @@
 |--------|------|------|
 | M1 | 仓库骨架：CLI、参数体系（`mb_opt_t`）、DNA 工具 | ✅ |
 | M2 | l2bit + BWT + 索引构建（`index` / `getref`） | ✅ |
-| M3 | 两轮 SMEM 种子 + kmer 缓存 | 未开始 |
-| M4 | 链化 + hit 处理 + mapQ | 未开始 |
-| M5 | ksw2 风格比对 + CIGAR + SAM/PAF（单端一致） | 未开始 |
+| M3 | 两轮 SMEM 种子 + kmer 缓存 | ✅ |
+| M4 | 链化 + hit 处理 + mapQ | ✅ |
+| M5 | ksw2 风格比对 + CIGAR + SAM/PAF（单端一致） | ✅ |
 | M6 | 配对端：insert size 统计、配对、rescue | 未开始 |
 | M7 | 自适应参数全量、对比脚本、CI、文档 | 未开始 |
 
-在 M5 完成前，本项目**不能用于比对**；生产环境请使用
-[C 版 minibwa](https://github.com/lh3/minibwa)。
+M5 完成后，本项目已支持单端比对（`map`），并在 chrM 测试数据上与 C 版
+输出逐字段一致（含 SA:Z 与全部可选标签）。配对端（M6）尚未完成；
+生产环境请使用 [C 版 minibwa](https://github.com/lh3/minibwa)。
 
 ## 构建与使用
 
@@ -36,7 +37,7 @@ minibwa-rust index ref.fa prefix        # 生成 prefix.l2b + prefix.mbw
 # 从 .l2b 还原参考序列（调试）
 minibwa-rust getref prefix.l2b
 
-# 比对（M5 之后可用）
+# 比对
 minibwa-rust map prefix read1.fq read2.fq > aln.sam
 ```
 
@@ -64,8 +65,8 @@ reads ──> 两轮 SMEM 种子 ──> 链化 ──> ksw2 比对 ──> SAM/
 cargo test
 ```
 
-索引字节级兼容性验证：先用 C 版 minibwa 对同一 FASTA 建索引，
-再与本项目输出逐字节比较（见 `tests/` 集成测试，M2 交付）。
+- M2：索引字节级兼容性验证（`tests/` 集成测试）
+- M5：chrM 单端 SAM/PAF 与 C 版 minibwa 逐字段一致（含 SA:Z、NM/AS/ms/md、cg:Z）
 
 ## 许可
 

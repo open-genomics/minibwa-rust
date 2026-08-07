@@ -227,11 +227,11 @@ fn run_map(
                     // SAM
                     if res.hits.is_empty() {
                         if opt.flag & minibwa_rust::opt::flag::NO_UNMAP == 0 {
-                            minibwa_rust::format::fmt_sam(&mut s, &idx.l2b, name, seq, None, None);
+                            minibwa_rust::format::fmt_sam(&mut s, &idx.l2b, name, seq, None, &res.hits, None);
                         }
                     } else {
                         let mut n_sec = 0i32;
-                        for h in &res.hits {
+                        for (hi, h) in res.hits.iter().enumerate() {
                             let is_pri = h.parent == h.id;
                             if !is_pri && n_sec >= opt.out_n { continue; }
                             if !is_pri {
@@ -240,7 +240,7 @@ fn run_map(
                                 let h_score = h.p.as_ref().map_or(h.score, |pp| pp.dp_max);
                                 if (h_score as f64) < opt.out_s as f64 * p_score as f64 { continue; }
                             }
-                            minibwa_rust::format::fmt_sam(&mut s, &idx.l2b, name, seq, None, Some(h));
+                            minibwa_rust::format::fmt_sam(&mut s, &idx.l2b, name, seq, None, &res.hits, Some(hi));
                             if !is_pri { n_sec += 1; }
                         }
                     }
