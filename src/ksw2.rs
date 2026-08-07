@@ -142,7 +142,7 @@ pub fn ksw_extd2(
                     if val > h { d = 1; h = val; }
                 } else if val >= h { d = 1; h = val; }
                 if !right { if a_raw > 0 { d |= 0x08; } }
-                else { if a_raw >= 0 { d |= 0x08; } }
+                else if a_raw >= 0 { d |= 0x08; }
             }
 
             // F1 (INS): H(i-1, j) 开 / F1(i-1, j) 延伸 / 地板
@@ -156,7 +156,7 @@ pub fn ksw_extd2(
                     if val > h { d = 2; h = val; }
                 } else if val >= h { d = 2; h = val; }
                 if !right { if a_raw > 0 { d |= 0x10; } }
-                else { if a_raw >= 0 { d |= 0x10; } }
+                else if a_raw >= 0 { d |= 0x10; }
             }
 
             // E2 (long DEL)
@@ -170,7 +170,7 @@ pub fn ksw_extd2(
                     if val > h { d = 3; h = val; }
                 } else if val >= h { d = 3; h = val; }
                 if !right { if a_raw > 0 { d |= 0x20; } }
-                else { if a_raw >= 0 { d |= 0x20; } }
+                else if a_raw >= 0 { d |= 0x20; }
             }
 
             // F2 (long INS)
@@ -184,7 +184,7 @@ pub fn ksw_extd2(
                     if val > h { d = 4; h = val; }
                 } else if val >= h { d = 4; h = val; }
                 if !right { if a_raw > 0 { d |= 0x40; } }
-                else { if a_raw >= 0 { d |= 0x40; } }
+                else if a_raw >= 0 { d |= 0x40; }
             }
 
             hc[j] = h;

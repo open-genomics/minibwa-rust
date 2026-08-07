@@ -23,6 +23,7 @@ pub mod l2bit;
 pub mod opt;
 pub mod chain;
 pub mod format;
+pub mod ksw2;
 pub mod mapcore;
 pub mod hits;
 pub mod seed;
