@@ -678,7 +678,7 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
             for &c in &ez.cigar { ksw2::push_cigar_vec(&mut r.p.as_mut().unwrap().cigar, c & 0xf, c >> 4); }
             r.p.as_mut().unwrap().dp_score += if ez.reach_end || force_end { ez.mqe.max(ez.score) } else { ez.max };
         }
-        te1 = ts_cur + (if ez.reach_end || force_end { (te0 - ts_cur) } else { (ez.max_t + 1) as i64 }) as i64;
+        te1 = ts_cur + (if ez.reach_end || force_end { te0 - ts_cur } else { (ez.max_t + 1) as i64 });
         qe1 = qs_cur + (if ez.reach_end || force_end { qe0 - qs_cur } else { ez.max_q + 1 });
     }
 
