@@ -7,7 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: bwa-rust
+  BINARY_NAME: minibwa-rust
 
 permissions:
   contents: read
@@ -50,23 +50,23 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            artifact: bwa-rust-linux-amd64-static
+            artifact: minibwa-rust-linux-amd64-static
             ext: ''
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: bwa-rust-linux-amd64
+            artifact: minibwa-rust-linux-amd64
             ext: ''
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact: bwa-rust-windows-amd64
+            artifact: minibwa-rust-windows-amd64
             ext: '.exe'
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact: bwa-rust-macos-amd64
+            artifact: minibwa-rust-macos-amd64
             ext: ''
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact: bwa-rust-macos-arm64
+            artifact: minibwa-rust-macos-arm64
             ext: ''
     steps:
       - uses: actions/checkout@v6

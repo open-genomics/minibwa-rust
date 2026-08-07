@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["open-genomics"]
 description = "Rust 重写的 minibwa：BWT 索引 + 变长种子 + minimap2 风格链化与比对的短读比对器"
 license = "MIT"
-repository = "https://github.com/open-genomics/bwa-rust"
+repository = "https://github.com/open-genomics/minibwa-rust"
 readme = "README.md"
 rust-version = "1.85"
 

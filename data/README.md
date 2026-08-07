@@ -18,7 +18,7 @@ bwa mem toy.fa toy_reads.fq > toy_bwa_mem.sam
 cat toy_bwa_mem.sam
 ```
 
-## 使用 bwa-rust 生成结果
+## 使用 minibwa-rust 生成结果
 
 ```bash
 # 1. 构建索引
