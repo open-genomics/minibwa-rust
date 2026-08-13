@@ -7,6 +7,11 @@
 本项目目标：
 
 - 索引文件与 C 版 minibwa **字节级兼容**（`.l2b` 参考序列 + `.mbw` BWT/采样 SA）
+
+> **Parity 测试前提**：`tests/c_parity.rs` 需要已编译的 C 版 minibwa 二进制
+> （`../minibwa/minibwa`）。该二进制不存在时，parity 测试会跳过并打印提示，
+> **不视为 C parity 已验证**。当前 CI 未构建 C 参考二进制，因此 CI 通过
+> 仅表示 Rust 自身测试通过，不证明与 C 版的字节级一致性。
 - 算法逐模块对照移植，以 C 版输出为基准做一致性验证
 - 纯 Rust 实现（后缀数组构建使用 libsais 的纯 Rust 移植 `libsais-rs`），无 C 依赖
 

@@ -20,7 +20,10 @@ fn c_minibwa() -> Option<PathBuf> {
     if p.exists() {
         Some(p)
     } else {
-        eprintln!("跳过 C 版对照测试：未找到 {}", p.display());
+        eprintln!(
+            "\n[PARITY SKIP] C 版 minibwa 二进制未找到 ({}). Parity 测试未执行，本次运行不验证 C 兼容性。\n",
+            p.display()
+        );
         None
     }
 }

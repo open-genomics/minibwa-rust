@@ -26,5 +26,7 @@ minibwa-rust 是 C 版 [minibwa](https://github.com/lh3/minibwa)（bwa-mem 继�
 ```bash
 cargo test
 cargo clippy --all-targets -- -D warnings
-# C 版对照（需先 make ../minibwa）
-./scripts/compare.sh <ref.fa> <reads.fq>   # M7 交付
+# C 版对照（需要 ../minibwa/minibwa 二进制；不存在时 parity 测试跳过）
+# 当前 CI 未构建 C 参考二进制，CI 通过 ≠ C parity 已验证
+./scripts/compare.sh <ref.fa> <reads.fq>   # 注意：脚本使用 bwa（非 minibwa），
+                                           # 且 Rust CLI 接口已漂移，待修复

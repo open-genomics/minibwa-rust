@@ -2,10 +2,22 @@
 # 对比原版 BWA 与 minibwa-rust 的对齐结果
 # 用法: ./scripts/compare.sh <reference.fa> <reads.fq>
 #
+# ⚠️  已知问题（接口漂移）：
+#   - 此脚本使用 `bwa`（Heng Li 的原版 BWA），不是 `minibwa`
+#   - Rust CLI 命令名和参数已变化：脚本使用 `align -i prefix.fm`，
+#     但当前 Rust CLI 是 `map <prefix> <reads>`，索引扩展名是 `.l2b`/`.mbw`
+#   - 脚本尚未更新以匹配当前接口
+#   - 在修复前，此脚本不应作为 parity 验证的依据
+#
 # 前置条件: 系统上安装了原版 bwa (bwa mem)
 # 输出: 在当前目录生成 bwa_result.sam 和 minibwa_rust_result.sam，并打印简要统计对比
 
 set -euo pipefail
+
+echo "WARNING: scripts/compare.sh has known interface drift (see header)."
+echo "         It uses 'bwa' (not 'minibwa') and outdated Rust CLI commands."
+echo "         Results are not a valid parity comparison."
+echo ""
 
 REFERENCE="${1:?Usage: $0 <reference.fa> <reads.fq>}"
 READS="${2:?Usage: $0 <reference.fa> <reads.fq>}"
@@ -41,7 +53,6 @@ echo "=== Comparison ==="
 
 count_mapped() {
     local sam_file="$1"
-    # 跳过 header 行，统计 mapped (FLAG 没有 0x4 位) 和 unmapped
     local total mapped unmapped
     total=$(grep -cv '^@' "$sam_file" || true)
     unmapped=$(awk '!/^@/ && and($2, 4)' "$sam_file" | wc -l || true)
