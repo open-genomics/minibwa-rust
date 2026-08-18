@@ -34,7 +34,20 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           grep -q "^version = \"$VERSION\"" Cargo.toml
 
+      - name: Install C build dependencies
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev gcc make
+
+      - name: Build C minibwa reference
+        run: |
+          COMMIT=$(grep -v '^#' C_MINIBWA_COMMIT | tr -d '[:space:]')
+          git clone https://github.com/lh3/minibwa.git "${GITHUB_WORKSPACE}/../minibwa"
+          git -C "${GITHUB_WORKSPACE}/../minibwa" checkout "$COMMIT"
+          make -C "${GITHUB_WORKSPACE}/../minibwa" -j"$(nproc)"
+          test -x "${GITHUB_WORKSPACE}/../minibwa/minibwa"
+
       - name: Run release verification
+        env:
+          MINIBWA_REQUIRE_PARITY: "1"
         run: |
           cargo fmt --all -- --check
           cargo clippy --all-targets --all-features -- -D warnings

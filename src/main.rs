@@ -25,8 +25,9 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)] // clap 子命令字段 naturally 偏大
 enum Commands {
-    /// 为参考基因组 FASTA 建索引（生成 <prefix>.l2b 与 <prefix>.mbw）
+    /// 为参考基因组 FASTA 建索引（生成 <prefix>.l2b 与 <prefix>.mbw；`--meth` 时再写 .meth.mbw）
     Index {
         /// 参考基因组 FASTA（支持 .gz）
         fasta: String,
@@ -41,6 +42,9 @@ enum Commands {
         /// 线程数
         #[arg(short = 't', long = "threads", default_value_t = 4usize)]
         threads: usize,
+        /// 为定向 BS-seq 额外构建 .meth.mbw（对照 C `index --meth`）
+        #[arg(long = "meth")]
+        meth: bool,
     },
     /// 从 .l2b 还原参考基因组序列（调试用，与 C 版 getref 一致）
     Getref {
@@ -112,6 +116,60 @@ enum Commands {
         /// 输出文件（默认 stdout）
         #[arg(short = 'o')]
         out: Option<String>,
+        /// SAM read group 行
+        #[arg(short = 'R')]
+        rg: Option<String>,
+        /// 复制 FASTA/Q 注释到输出（C 版 map 的 -y）
+        #[arg(short = 'y')]
+        copy_comment: bool,
+        /// 补充比对使用软剪
+        #[arg(short = 'Y')]
+        supp_soft: bool,
+        /// insert size 分布 mean[,stddev[,max[,min]]]
+        #[arg(short = 'I')]
+        isize: Option<String>,
+        /// 匹配得分
+        #[arg(short = 'A')]
+        a: Option<i32>,
+        /// 错配罚分
+        #[arg(short = 'B')]
+        b_mm: Option<i32>,
+        /// 开 gap，INT[,INT]
+        #[arg(short = 'O')]
+        gap_open: Option<String>,
+        /// 延伸 gap，INT[,INT]
+        #[arg(short = 'E')]
+        gap_ext: Option<String>,
+        /// 未配对罚分
+        #[arg(short = 'U')]
+        pen_unpair: Option<i32>,
+        /// 最低 DP 得分阈值（×a）
+        #[arg(short = 's')]
+        min_dp_max: Option<i32>,
+        /// 输出 cs/ds/MD 标签
+        #[arg(short = 'b')]
+        tag: Option<String>,
+        /// CIGAR 使用 =/X
+        #[arg(long = "eqx")]
+        eqx: bool,
+        /// 自适应参数 yes|no
+        #[arg(long = "adap")]
+        adap: Option<String>,
+        /// 配对模式 yes|no
+        #[arg(long = "pe")]
+        pe: Option<String>,
+        /// Hi-C：等价于 -5P
+        #[arg(long = "hic")]
+        hic: bool,
+        /// mate rescue 候选数
+        #[arg(long = "rescue")]
+        rescue: Option<i32>,
+        /// XA 标签最多条数
+        #[arg(long = "xa")]
+        xa: Option<i32>,
+        /// 与 --outs 相同
+        #[arg(long = "xa-ratio")]
+        xa_ratio: Option<f32>,
     },
     /// 兼容 bwa-mem 的旧式命令行（不推荐）
     #[command(disable_help_flag = true)]
@@ -327,7 +385,38 @@ fn trim_pair_suffix(seqs: &mut [minibwa_rust::io::kseq::SeqRecord], frags: &[Fra
     }
 }
 
-/// 解析 -I mean[,stddev[,max[,min]]]（对应 C 版 `set_ins_size`）。
+/// 解析 -O/-E 的 INT 或 INT,INT（对应 C 版 strtol 逗号语法）。
+fn parse_oe(arg: &str) -> (i32, i32) {
+    match arg.split_once(',') {
+        Some((a, b)) => (a.parse().unwrap_or(0), b.parse().unwrap_or(0)),
+        None => {
+            let v = arg.parse().unwrap_or(0);
+            (v, v)
+        }
+    }
+}
+
+/// 对应 C 版 `yes_or_no`（yes_to_set=true：yes 置位、no 清位）。
+fn yes_or_no(opt: &mut minibwa_rust::opt::Opt, flag: u64, arg: &str, yes_to_set: bool, name: &str) {
+    match arg {
+        "yes" | "y" => {
+            if yes_to_set {
+                opt.flag |= flag;
+            } else {
+                opt.flag &= !flag;
+            }
+        }
+        "no" | "n" => {
+            if yes_to_set {
+                opt.flag &= !flag;
+            } else {
+                opt.flag |= flag;
+            }
+        }
+        _ => eprintln!("[WARNING] option '--{name}' only accepts 'yes' or 'no'."),
+    }
+}
+
 fn set_ins_size(opt: &mut minibwa_rust::opt::Opt, arg: &str) {
     let mut parts = arg.splitn(4, ',');
     let avg = parts.next().unwrap_or("").parse::<f64>().unwrap_or(0.0);
@@ -606,9 +695,10 @@ fn main() -> Result<()> {
             seed,
             sa_bit,
             threads,
+            meth,
         } => {
             let prefix = prefix.unwrap_or_else(|| fasta.clone());
-            minibwa_rust::index::build(&fasta, &prefix, seed, sa_bit, threads)
+            minibwa_rust::index::build(&fasta, &prefix, seed, sa_bit, threads, meth)
         }
         Commands::Getref { l2b } => minibwa_rust::l2bit::getref(&l2b),
         Commands::Fastmap {
@@ -641,6 +731,24 @@ fn main() -> Result<()> {
             out_s,
             out_n,
             out,
+            rg,
+            copy_comment,
+            supp_soft,
+            isize,
+            a,
+            b_mm,
+            gap_open,
+            gap_ext,
+            pen_unpair,
+            min_dp_max,
+            tag,
+            eqx,
+            adap,
+            pe,
+            hic,
+            rescue,
+            xa,
+            xa_ratio,
         } => {
             let mut opt = minibwa_rust::opt::Opt::default();
             if opt.apply_preset(&preset).is_err() {
@@ -678,8 +786,39 @@ fn main() -> Result<()> {
             if let Some(v) = out_s {
                 opt.out_s = v;
             }
+            if let Some(v) = xa_ratio {
+                opt.out_s = v;
+            }
             if let Some(v) = out_n {
                 opt.out_n = v;
+            }
+            if let Some(v) = a {
+                opt.a = v;
+            }
+            if let Some(v) = b_mm {
+                opt.b = v;
+            }
+            if let Some(ref v) = gap_open {
+                let (q, q2) = parse_oe(v);
+                opt.q = q;
+                opt.q2 = q2;
+            }
+            if let Some(ref v) = gap_ext {
+                let (e, e2) = parse_oe(v);
+                opt.e = e;
+                opt.e2 = e2;
+            }
+            if let Some(v) = pen_unpair {
+                opt.pen_unpair = v;
+            }
+            if let Some(v) = min_dp_max {
+                opt.min_dp_max = v;
+            }
+            if let Some(v) = rescue {
+                opt.max_rescue = v;
+            }
+            if let Some(v) = xa {
+                opt.xa_max = v;
             }
             opt.n_thread = threads.max(1) as i32;
             if no_pairing {
@@ -687,6 +826,9 @@ fn main() -> Result<()> {
             }
             if primary5 {
                 opt.flag |= minibwa_rust::opt::flag::PRIMARY5;
+            }
+            if hic {
+                opt.flag |= minibwa_rust::opt::flag::PRIMARY5 | minibwa_rust::opt::flag::NO_PAIRING;
             }
             if no_unmap {
                 opt.flag |= minibwa_rust::opt::flag::NO_UNMAP;
@@ -697,10 +839,49 @@ fn main() -> Result<()> {
             if chain_only {
                 opt.flag |= minibwa_rust::opt::flag::NO_ALN;
             }
+            if copy_comment {
+                opt.flag |= minibwa_rust::opt::flag::COPY_COMMENT;
+            }
+            if supp_soft {
+                opt.flag |= minibwa_rust::opt::flag::SUPP_SOFT;
+            }
+            if eqx {
+                opt.flag |= minibwa_rust::opt::flag::EQX;
+            }
+            if let Some(ref v) = adap {
+                yes_or_no(&mut opt, minibwa_rust::opt::flag::ADAP, v, true, "adap");
+            }
+            if let Some(ref v) = pe {
+                yes_or_no(&mut opt, minibwa_rust::opt::flag::PE, v, true, "pe");
+            }
+            if let Some(ref v) = isize {
+                set_ins_size(&mut opt, v);
+            }
+            if let Some(ref v) = tag {
+                opt.flag &= !(minibwa_rust::opt::flag::WRITE_CS
+                    | minibwa_rust::opt::flag::WRITE_DS
+                    | minibwa_rust::opt::flag::WRITE_MD);
+                match v.as_str() {
+                    "cs" => opt.flag |= minibwa_rust::opt::flag::WRITE_CS,
+                    "ds" => opt.flag |= minibwa_rust::opt::flag::WRITE_DS,
+                    "MD" | "md" => opt.flag |= minibwa_rust::opt::flag::WRITE_MD,
+                    _ => {
+                        opt.flag |= minibwa_rust::opt::flag::WRITE_CS;
+                        eprintln!("[WARNING] -b only takes 'cs', 'ds' or 'MD'. Invalid values are assumed to be 'cs'.");
+                    }
+                }
+            }
             if opt.flag & minibwa_rust::opt::flag::NO_ALN != 0 {
                 opt.flag |= minibwa_rust::opt::flag::NO_PAIRING | minibwa_rust::opt::flag::PAF;
             }
-            run_map(&reference, &reads1, reads2.as_deref(), &opt, out.as_deref(), None)
+            run_map(
+                &reference,
+                &reads1,
+                reads2.as_deref(),
+                &opt,
+                out.as_deref(),
+                rg.as_deref(),
+            )
         }
         Commands::Mem {
             reference,

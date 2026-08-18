@@ -18,6 +18,7 @@
 pub mod align;
 pub mod bwt;
 pub mod chain;
+pub mod cs;
 pub mod dna;
 pub mod format;
 pub mod hits;

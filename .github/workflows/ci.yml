@@ -11,6 +11,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   CARGO_INCREMENTAL: 0
+  MINIBWA_REQUIRE_PARITY: "1"
 
 permissions:
   contents: read
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust fmt, clippy, tests
+    name: Rust fmt, clippy, tests + C parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -30,6 +31,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Install C build dependencies
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev gcc make
+
+      - name: Build C minibwa reference
+        run: |
+          COMMIT=$(grep -v '^#' C_MINIBWA_COMMIT | tr -d '[:space:]')
+          git clone https://github.com/lh3/minibwa.git "${GITHUB_WORKSPACE}/../minibwa"
+          git -C "${GITHUB_WORKSPACE}/../minibwa" checkout "$COMMIT"
+          make -C "${GITHUB_WORKSPACE}/../minibwa" -j"$(nproc)"
+          test -x "${GITHUB_WORKSPACE}/../minibwa/minibwa"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -42,5 +54,5 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
+      - name: Run tests (including C parity)
         run: cargo test --all-targets --all-features

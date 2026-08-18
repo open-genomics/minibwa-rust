@@ -10,26 +10,27 @@ Documentation SHALL distinguish Rust-only tests from tests that require a C mini
 - **THEN** each live parity command SHALL list its required binary and data
 - **AND** SHALL state that missing prerequisites mean parity was not verified
 
-### Requirement: Current CI scope is truthful
-Documentation SHALL NOT claim that current CI proves C parity while its parity tests can skip for missing prerequisites.
+### Requirement: CI builds the pinned C reference
+CI SHALL clone `https://github.com/lh3/minibwa` at the commit in `C_MINIBWA_COMMIT`, build `minibwa`, place it at `../minibwa/minibwa` relative to the crate root, and set `MINIBWA_REQUIRE_PARITY=1`.
 
-#### Scenario: CI runs without C reference
-- **GIVEN** the workflow does not build/provide C minibwa and required data
+#### Scenario: CI runs with C reference
+- **GIVEN** the workflow builds the pinned C minibwa and test data from that clone
 - **WHEN** Cargo tests complete
-- **THEN** project documentation SHALL classify the run as Rust test success, not C parity success
+- **THEN** live parity tests SHALL have executed
+- **AND** a missing binary or chrM fixture SHALL fail the job
 
-### Requirement: Skip behavior is observable
-When a live parity test is skipped because a reference dependency is absent, the reason SHALL be visible in test output or documented verification evidence.
+### Requirement: Local skip remains observable
+When a developer runs tests without the C binary and without `MINIBWA_REQUIRE_PARITY`, skip SHALL print `[PARITY SKIP]` and SHALL NOT be described as a passed comparison.
 
-#### Scenario: Reference binary missing
-- **WHEN** a developer runs the parity suite without the configured C binary
+#### Scenario: Reference binary missing locally
+- **WHEN** a developer runs the parity suite without `../minibwa/minibwa` and without `MINIBWA_REQUIRE_PARITY`
 - **THEN** the run SHALL expose that live parity was not executed
 - **AND** SHALL NOT describe the skipped case as a passed comparison
 
 ### Requirement: Comparison helper matches supported interfaces
-Any maintained comparison script SHALL invoke commands and consume files that exist in the audited Rust and C interfaces.
+`scripts/compare.sh` SHALL invoke C `minibwa map` and Rust `map` against `.l2b`/`.mbw` indexes produced by each binary's `index` command.
 
-#### Scenario: Helper cannot be validated
-- **WHEN** the C source/version needed to validate the helper is unknown
-- **THEN** the helper change SHALL remain blocked or the script SHALL be explicitly documented as unsupported
-- **AND** no substitute implementation SHALL be presented as the reference
+#### Scenario: Helper is run with current CLI
+- **WHEN** the user runs `./scripts/compare.sh ref.fa reads.fq`
+- **THEN** the script SHALL fail if the C binary is missing
+- **AND** SHALL NOT invoke `bwa` or a non-existent Rust `align` subcommand

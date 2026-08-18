@@ -14,9 +14,9 @@
 
 ## External boundaries
 
-- **C minibwa**: reference implementation at `https://github.com/lh3/minibwa`.
-  Local path: `../minibwa/minibwa`. No pinned commit confirmed.
-- **`bwa` (Heng Li)**: used by `scripts/compare.sh`, not `minibwa`. Script has interface drift.
+- **C minibwa**: `https://github.com/lh3/minibwa`, commit in `C_MINIBWA_COMMIT`.
+  Local path: `../minibwa`（二进制 `../minibwa/minibwa`）。CI 编译该 commit 并设置 `MINIBWA_REQUIRE_PARITY=1`。
+- **`scripts/compare.sh`**: C `minibwa map` vs Rust `map`；索引 `.l2b`/`.mbw`。
 
 ## Validation commands
 

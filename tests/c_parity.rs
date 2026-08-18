@@ -1,7 +1,8 @@
 //! 与 C 版 minibwa 的字节级对照测试。
 //!
-//! 需要相邻目录存在已编译的 C 版 minibwa（`../minibwa/minibwa`）；
-//! 不存在时跳过并打印提示（CI 无 C 二进制时不视为失败）。
+//! 需要相邻目录存在已编译的 C 版 minibwa（`../minibwa/minibwa`），commit 见仓库根目录
+//! `C_MINIBWA_COMMIT`。默认缺失时跳过并打印 `[PARITY SKIP]`；设置
+//! `MINIBWA_REQUIRE_PARITY=1`（CI）时缺失即失败。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,12 +19,36 @@ ACACACACACACACACACACGTGTGTGTGTGTGTGTGTGTGTGTGTGT
 fn c_minibwa() -> Option<PathBuf> {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/minibwa");
     if p.exists() {
+        return Some(p);
+    }
+    let msg = format!(
+        "C 版 minibwa 二进制未找到 ({})。Parity 测试未执行，本次运行不验证 C 兼容性。",
+        p.display()
+    );
+    if std::env::var_os("MINIBWA_REQUIRE_PARITY").is_some() {
+        panic!("MINIBWA_REQUIRE_PARITY=1：{msg}");
+    }
+    eprintln!("\n[PARITY SKIP] {msg}\n");
+    None
+}
+
+fn strip_sam_header(out: &[u8]) -> Vec<String> {
+    std::str::from_utf8(out)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.starts_with('@'))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn require_chrm(name: &str) -> Option<PathBuf> {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test").join(name);
+    if p.exists() {
         Some(p)
+    } else if std::env::var_os("MINIBWA_REQUIRE_PARITY").is_some() {
+        panic!("MINIBWA_REQUIRE_PARITY=1：缺少 {}", p.display());
     } else {
-        eprintln!(
-            "\n[PARITY SKIP] C 版 minibwa 二进制未找到 ({}). Parity 测试未执行，本次运行不验证 C 兼容性。\n",
-            p.display()
-        );
+        eprintln!("跳过：缺少 {}", p.display());
         None
     }
 }
@@ -61,6 +86,12 @@ fn parity_index(dir: &Path, c: &Path, extra_args: &[&str]) {
     let c_mbw = std::fs::read(dir.join("c.mbw")).unwrap();
     let r_mbw = std::fs::read(dir.join("r.mbw")).unwrap();
     assert_eq!(c_mbw, r_mbw, ".mbw 字节不一致 (args={extra_args:?})");
+
+    if extra_args.contains(&"--meth") {
+        let c_meth = std::fs::read(dir.join("c.meth.mbw")).unwrap();
+        let r_meth = std::fs::read(dir.join("r.meth.mbw")).unwrap();
+        assert_eq!(c_meth, r_meth, ".meth.mbw 字节不一致 (args={extra_args:?})");
+    }
 }
 
 #[test]
@@ -77,6 +108,14 @@ fn index_parity_sa_bit_and_seed() {
     let dir = std::env::temp_dir().join("minibwa-rust-parity-u2s42");
     std::fs::create_dir_all(&dir).unwrap();
     parity_index(&dir, &c, &["-u", "2", "-s", "42"]);
+}
+
+#[test]
+fn index_parity_meth() {
+    let Some(c) = c_minibwa() else { return };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-meth");
+    std::fs::create_dir_all(&dir).unwrap();
+    parity_index(&dir, &c, &["--meth"]);
 }
 
 #[test]
@@ -99,11 +138,9 @@ fn getref_parity() {
 fn rust_loads_c_index_chrm() {
     // 加载 C 版对真实数据（chrM）建的索引：验证 gzip FASTA 路径与大一点的基因组
     let Some(c) = c_minibwa() else { return };
-    let mb = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test/chrM-human.fa.gz");
-    if !mb.exists() {
-        eprintln!("跳过：缺少 {}", mb.display());
+    let Some(mb) = require_chrm("chrM-human.fa.gz") else {
         return;
-    }
+    };
     let dir = std::env::temp_dir().join("minibwa-rust-parity-chrm");
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -130,27 +167,17 @@ fn rust_loads_c_index_chrm() {
 fn fastmap_parity() {
     // 种子级对照：C/Rust 的 fastmap 输出必须逐字节一致
     let Some(c) = c_minibwa() else { return };
-    let mb_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test");
-    let reads = mb_dir.join("chrM-read_1.fa.gz");
-    if !reads.exists() {
-        eprintln!("跳过：缺少 {}", reads.display());
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
         return;
-    }
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
     let dir = std::env::temp_dir().join("minibwa-rust-parity-fastmap");
     std::fs::create_dir_all(&dir).unwrap();
 
-    let mut cc = Command::new(&c);
-    cc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("c"));
-    run(&mut cc);
-    let mut rc = Command::new(rust_bin());
-    rc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("r"));
-    run(&mut rc);
+    run(Command::new(&c).arg("index").arg("-t1").arg(&fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(&fa).arg(dir.join("r")));
 
     for args in [
         &["-l", "19", "-s", "1", "-w", "20"][..],
@@ -179,27 +206,17 @@ fn fastmap_parity() {
 fn chain_only_paf_parity() {
     // 链级对照：--chain-only PAF 输出必须逐字节一致（覆盖链化/hit/mapQ）
     let Some(c) = c_minibwa() else { return };
-    let mb_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test");
-    let reads = mb_dir.join("chrM-read_2.fa.gz");
-    if !reads.exists() {
-        eprintln!("跳过：缺少 {}", reads.display());
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
         return;
-    }
+    };
+    let Some(reads) = require_chrm("chrM-read_2.fa.gz") else {
+        return;
+    };
     let dir = std::env::temp_dir().join("minibwa-rust-parity-chain");
     std::fs::create_dir_all(&dir).unwrap();
 
-    let mut cc = Command::new(&c);
-    cc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("c"));
-    run(&mut cc);
-    let mut rc = Command::new(rust_bin());
-    rc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("r"));
-    run(&mut rc);
+    run(Command::new(&c).arg("index").arg("-t1").arg(&fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(&fa).arg(dir.join("r")));
 
     let cases: &[&[&str]] = &[
         &[],
@@ -235,44 +252,103 @@ fn chain_only_paf_parity() {
     }
 }
 
+/// 单端 SAM：chrM read_1 去 header 后与 C 版逐行一致。
+#[test]
+fn se_sam_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-se-sam");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    run(Command::new(&c).arg("index").arg("-t1").arg(&fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(&fa).arg(dir.join("r")));
+
+    for args in [&["-t1"][..], &["-t1", "-x", "sr"][..], &["-t1", "-x", "lr"][..]] {
+        let c_out = Command::new(&c)
+            .arg("map")
+            .args(args)
+            .arg(dir.join("c"))
+            .arg(&reads)
+            .output()
+            .unwrap();
+        let r_out = Command::new(rust_bin())
+            .arg("map")
+            .args(args)
+            .arg(dir.join("r"))
+            .arg(&reads)
+            .output()
+            .unwrap();
+        assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
+        assert_eq!(
+            strip_sam_header(&c_out.stdout),
+            strip_sam_header(&r_out.stdout),
+            "SE SAM 不一致 (args={args:?})"
+        );
+    }
+}
+
+/// 单端 PAF：`-f` 输出与 C 版逐字节一致。
+#[test]
+fn se_paf_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-se-paf");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    run(Command::new(&c).arg("index").arg("-t1").arg(&fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(&fa).arg(dir.join("r")));
+
+    let c_out = Command::new(&c)
+        .arg("map")
+        .arg("-f")
+        .arg("-t1")
+        .arg(dir.join("c"))
+        .arg(&reads)
+        .output()
+        .unwrap();
+    let r_out = Command::new(rust_bin())
+        .arg("map")
+        .arg("-f")
+        .arg("-t1")
+        .arg(dir.join("r"))
+        .arg(&reads)
+        .output()
+        .unwrap();
+    assert!(c_out.status.success() && r_out.status.success());
+    assert_eq!(c_out.stdout, r_out.stdout, "SE PAF 不一致");
+}
+
 /// 配对端对照：PE SAM 输出必须与 C 版逐行一致（跳过 header）。
 /// 覆盖：pestat 数据估计 → mb_pair → rescue → 配对 SAM（flag/RNEXT/PNEXT/TLEN/MC/MQ）。
 #[test]
 fn pe_sam_parity() {
     let Some(c) = c_minibwa() else { return };
-    let mb_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test");
-    let r1 = mb_dir.join("chrM-read_1.fa.gz");
-    let r2 = mb_dir.join("chrM-read_2.fa.gz");
-    if !r1.exists() || !r2.exists() {
-        eprintln!("跳过：缺少 chrM PE 数据");
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
         return;
-    }
+    };
+    let Some(r1) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let Some(r2) = require_chrm("chrM-read_2.fa.gz") else {
+        return;
+    };
     let dir = std::env::temp_dir().join("minibwa-rust-parity-pe");
     std::fs::create_dir_all(&dir).unwrap();
 
-    let mut cc = Command::new(&c);
-    cc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("c"));
-    run(&mut cc);
-    let mut rc = Command::new(rust_bin());
-    rc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("r"));
-    run(&mut rc);
+    run(Command::new(&c).arg("index").arg("-t1").arg(&fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(&fa).arg(dir.join("r")));
 
     // 去 header 后逐行对比（@PG 的 CL 等元数据不同）
-    let strip_header = |out: &[u8]| -> Vec<String> {
-        std::str::from_utf8(out)
-            .unwrap()
-            .lines()
-            .filter(|l| !l.starts_with('@'))
-            .map(ToString::to_string)
-            .collect()
-    };
-
     for args in [&["-t1"][..], &["-t1", "-P"][..], &["-t1", "-5"][..]] {
         let c_out = Command::new(&c)
             .arg("map")
@@ -292,8 +368,8 @@ fn pe_sam_parity() {
             .unwrap();
         assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
         assert_eq!(
-            strip_header(&c_out.stdout),
-            strip_header(&r_out.stdout),
+            strip_sam_header(&c_out.stdout),
+            strip_sam_header(&r_out.stdout),
             "PE SAM 不一致 (args={args:?})"
         );
     }
@@ -303,37 +379,20 @@ fn pe_sam_parity() {
 #[test]
 fn mem_pe_parity() {
     let Some(c) = c_minibwa() else { return };
-    let mb_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../minibwa/test");
-    let r1 = mb_dir.join("chrM-read_1.fa.gz");
-    let r2 = mb_dir.join("chrM-read_2.fa.gz");
-    if !r1.exists() || !r2.exists() {
-        eprintln!("跳过：缺少 chrM PE 数据");
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
         return;
-    }
+    };
+    let Some(r1) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let Some(r2) = require_chrm("chrM-read_2.fa.gz") else {
+        return;
+    };
     let dir = std::env::temp_dir().join("minibwa-rust-parity-mem");
     std::fs::create_dir_all(&dir).unwrap();
 
-    let mut cc = Command::new(&c);
-    cc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("c"));
-    run(&mut cc);
-    let mut rc = Command::new(rust_bin());
-    rc.arg("index")
-        .arg("-t1")
-        .arg(mb_dir.join("chrM-human.fa.gz"))
-        .arg(dir.join("r"));
-    run(&mut rc);
-
-    let strip_header = |out: &[u8]| -> Vec<String> {
-        std::str::from_utf8(out)
-            .unwrap()
-            .lines()
-            .filter(|l| !l.starts_with('@'))
-            .map(ToString::to_string)
-            .collect()
-    };
+    run(Command::new(&c).arg("index").arg("-t1").arg(&fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(&fa).arg(dir.join("r")));
 
     for args in [&["-t1"][..], &["-t1", "-I", "300,80,500,100"][..], &["-t1", "-S"][..]] {
         let c_out = Command::new(&c)
@@ -354,9 +413,133 @@ fn mem_pe_parity() {
             .unwrap();
         assert!(c_out.status.success() && r_out.status.success(), "args={args:?}");
         assert_eq!(
-            strip_header(&c_out.stdout),
-            strip_header(&r_out.stdout),
+            strip_sam_header(&c_out.stdout),
+            strip_sam_header(&r_out.stdout),
             "mem PE SAM 不一致 (args={args:?})"
         );
     }
+}
+
+fn index_chrm(c: &Path, dir: &Path, fa: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    run(Command::new(c).arg("index").arg("-t1").arg(fa).arg(dir.join("c")));
+    run(Command::new(rust_bin()).arg("index").arg("-t1").arg(fa).arg(dir.join("r")));
+}
+
+fn map_stdout(bin: &str, extra: &[&str], prefix: &Path, reads: &[&Path]) -> Vec<u8> {
+    let mut cmd = Command::new(bin);
+    cmd.arg("map").args(extra).arg("-t1").arg(prefix);
+    for r in reads {
+        cmd.arg(r);
+    }
+    let out = cmd.output().unwrap();
+    assert!(
+        out.status.success(),
+        "map 失败 extra={extra:?} stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+}
+
+/// `map --eqx`：CIGAR 使用 =/X，与 C 版去 header 后逐行一致。
+#[test]
+fn map_eqx_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-eqx");
+    index_chrm(&c, &dir, &fa);
+    let extra = ["--eqx"];
+    assert_eq!(
+        strip_sam_header(&map_stdout(c.to_str().unwrap(), &extra, &dir.join("c"), &[&reads])),
+        strip_sam_header(&map_stdout(rust_bin(), &extra, &dir.join("r"), &[&reads])),
+        "map --eqx SAM 不一致"
+    );
+}
+
+/// `map -b cs`：cs:Z 标签与 C 版逐行一致。
+#[test]
+fn map_cs_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-cs");
+    index_chrm(&c, &dir, &fa);
+    let extra = ["-b", "cs"];
+    assert_eq!(
+        strip_sam_header(&map_stdout(c.to_str().unwrap(), &extra, &dir.join("c"), &[&reads])),
+        strip_sam_header(&map_stdout(rust_bin(), &extra, &dir.join("r"), &[&reads])),
+        "map -b cs SAM 不一致"
+    );
+}
+
+/// `map -b ds`：ds:Z 标签与 C 版逐行一致。
+#[test]
+fn map_ds_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-ds");
+    index_chrm(&c, &dir, &fa);
+    let extra = ["-b", "ds"];
+    assert_eq!(
+        strip_sam_header(&map_stdout(c.to_str().unwrap(), &extra, &dir.join("c"), &[&reads])),
+        strip_sam_header(&map_stdout(rust_bin(), &extra, &dir.join("r"), &[&reads])),
+        "map -b ds SAM 不一致"
+    );
+}
+
+/// `map --hic` 等价于 `-5P`。
+#[test]
+fn map_hic_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(r1) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let Some(r2) = require_chrm("chrM-read_2.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-hic");
+    index_chrm(&c, &dir, &fa);
+    let extra = ["--hic"];
+    assert_eq!(
+        strip_sam_header(&map_stdout(c.to_str().unwrap(), &extra, &dir.join("c"), &[&r1, &r2])),
+        strip_sam_header(&map_stdout(rust_bin(), &extra, &dir.join("r"), &[&r1, &r2])),
+        "map --hic SAM 不一致"
+    );
+}
+
+/// `--adap no` 关闭按读长插值；短读上与 C 版一致。
+#[test]
+fn map_adap_no_parity() {
+    let Some(c) = c_minibwa() else { return };
+    let Some(fa) = require_chrm("chrM-human.fa.gz") else {
+        return;
+    };
+    let Some(reads) = require_chrm("chrM-read_1.fa.gz") else {
+        return;
+    };
+    let dir = std::env::temp_dir().join("minibwa-rust-parity-adap-no");
+    index_chrm(&c, &dir, &fa);
+    let extra = ["--adap", "no"];
+    assert_eq!(
+        strip_sam_header(&map_stdout(c.to_str().unwrap(), &extra, &dir.join("c"), &[&reads])),
+        strip_sam_header(&map_stdout(rust_bin(), &extra, &dir.join("r"), &[&reads])),
+        "map --adap no SAM 不一致"
+    );
 }

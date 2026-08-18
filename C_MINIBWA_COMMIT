@@ -1,0 +1,3 @@
+# C 版 minibwa 对照用 commit（https://github.com/lh3/minibwa）
+# 本地：git -C ../minibwa checkout $(grep -v '^#' C_MINIBWA_COMMIT | tr -d '[:space:]') && make -C ../minibwa
+f0e117436c28addc359b67123d2353f0d4a1f9e8

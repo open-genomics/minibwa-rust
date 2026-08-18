@@ -9,38 +9,78 @@ use crate::l2bit::{open_fasta, L2b};
 const FS: usize = 10000;
 
 /// 为参考基因组 FASTA 建索引（对应 `main_index` 的默认 libsais 路径）。
-/// 生成 `<prefix>.l2b` 与 `<prefix>.mbw`。
-pub fn build(fasta: &str, prefix: &str, seed: u64, sa_bit: u32, threads: usize) -> Result<()> {
+/// 生成 `<prefix>.l2b` 与 `<prefix>.mbw`；`is_meth` 时再写 `<prefix>.meth.mbw`。
+pub fn build(fasta: &str, prefix: &str, seed: u64, sa_bit: u32, threads: usize, is_meth: bool) -> Result<()> {
     let reader = open_fasta(fasta)?;
     let l2b = L2b::import(reader, seed)?;
     if l2b.tot_len == 0 {
         bail!("参考基因组为空: {fasta}");
     }
     eprintln!("[M::index] {} 条序列，共 {} bp", l2b.ctg.len(), l2b.tot_len);
-    let bwt = bwt_libsais(&l2b, sa_bit, true, threads)?;
+    let bwt = bwt_libsais(&l2b, sa_bit, true, false, threads)?;
     let fn_l2b = format!("{prefix}.l2b");
     let fn_mbw = format!("{prefix}.mbw");
     l2b.save(&fn_l2b)?;
     bwt.save(&fn_mbw)?;
-    eprintln!("[M::index] 索引已写入 {fn_l2b} 与 {fn_mbw}");
+    if is_meth {
+        let bwt_meth = bwt_libsais(&l2b, sa_bit, true, true, threads)?;
+        let fn_meth = format!("{prefix}.meth.mbw");
+        bwt_meth.save(&fn_meth)?;
+        eprintln!("[M::index] 索引已写入 {fn_l2b} 与 {fn_mbw} 与 {fn_meth}");
+    } else {
+        eprintln!("[M::index] 索引已写入 {fn_l2b} 与 {fn_mbw}");
+    }
     Ok(())
 }
 
 /// libsais 构建 BWT + 采样 SA（对应 `mb_bwt_libsais`）。
-pub(crate) fn bwt_libsais(l2b: &L2b, sa_bit: u32, both_strand: bool, threads: usize) -> Result<Bwt> {
-    let len = if both_strand { l2b.tot_len * 2 } else { l2b.tot_len };
+pub(crate) fn bwt_libsais(
+    l2b: &L2b,
+    sa_bit: u32,
+    both_strand: bool,
+    is_meth: bool,
+    threads: usize,
+) -> Result<Bwt> {
+    let copies = if is_meth { 2u64 } else { 1 };
+    let strands = if both_strand { 2u64 } else { 1 };
+    let len = l2b.tot_len * copies * strands;
     let use_int32 = len + (FS as u64) < (i32::MAX as u64);
 
-    // 拼接文本：正向 + 反向互补（2-bit）
+    // 拼接文本：对照 `mb_bwt_libsais` 的 is_meth / both_strand 分支
     let mut seq = vec![0u8; len as usize];
-    for (i, s) in seq.iter_mut().enumerate().take(l2b.tot_len as usize) {
-        *s = l2b.get0(i as u64);
-    }
-    if both_strand {
-        for i in (0..l2b.tot_len as usize).rev() {
-            seq[2 * l2b.tot_len as usize - 1 - i] = 3 - l2b.get0(i as u64);
+    let mut j = 0usize;
+    if is_meth {
+        for i in 0..l2b.tot_len as usize {
+            seq[j] = L2b::c2t(l2b.get0(i as u64));
+            j += 1;
+        }
+        for i in 0..l2b.tot_len as usize {
+            seq[j] = L2b::g2a(l2b.get0(i as u64));
+            j += 1;
+        }
+        if both_strand {
+            for i in (0..l2b.tot_len as usize).rev() {
+                seq[j] = 3 - L2b::g2a(l2b.get0(i as u64));
+                j += 1;
+            }
+            for i in (0..l2b.tot_len as usize).rev() {
+                seq[j] = 3 - L2b::c2t(l2b.get0(i as u64));
+                j += 1;
+            }
+        }
+    } else {
+        for i in 0..l2b.tot_len as usize {
+            seq[j] = l2b.get0(i as u64);
+            j += 1;
+        }
+        if both_strand {
+            for i in (0..l2b.tot_len as usize).rev() {
+                seq[j] = 3 - l2b.get0(i as u64);
+                j += 1;
+            }
         }
     }
+    debug_assert_eq!(j, len as usize);
 
     let n_ssa = ((len + (1u64 << sa_bit)) >> sa_bit) as usize;
     let mut ssa = vec![0u64; n_ssa];
@@ -138,7 +178,8 @@ pub struct Idx {
 impl Idx {
     pub fn load(prefix: &str) -> Result<Idx> {
         let l2b = L2b::load(format!("{prefix}.l2b"))?;
-        let bwt = Bwt::load(format!("{prefix}.mbw"))?;
+        let mut bwt = Bwt::load(format!("{prefix}.mbw"))?;
+        bwt.cache(10); // 对照 mb_idx_load：硬编码 10-mer
         Ok(Idx { l2b, bwt })
     }
 }

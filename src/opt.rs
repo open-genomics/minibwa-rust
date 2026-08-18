@@ -154,7 +154,6 @@ impl Opt {
                     self.flag |= flag::ADAP;
                 }
                 self.min_dp_max = 30;
-                self.flag |= flag::ADAP; // C 版在 sr 分支也置 ADAP（保持原样）
                 self.bw = 100;
                 self.max_gap = 100;
                 self.zdrop = 80;
@@ -252,6 +251,20 @@ mod tests {
         assert_eq!(opt.b, 8);
         assert!(opt.flag & flag::PE != 0);
         assert!(opt.flag & flag::ADAP != 0);
+    }
+
+    /// 对照 C 版 `mb_opt_preset`：只有 `"adap"` 置 `MB_F_ADAP`，`"sr"` 不置。
+    #[test]
+    fn sr_preset_does_not_set_adap() {
+        let mut sr = Opt::reset();
+        sr.apply_preset("sr").unwrap();
+        assert!(sr.flag & flag::PE != 0);
+        assert_eq!(sr.flag & flag::ADAP, 0);
+
+        let mut adap = Opt::reset();
+        adap.apply_preset("adap").unwrap();
+        assert!(adap.flag & flag::PE != 0);
+        assert!(adap.flag & flag::ADAP != 0);
     }
 
     #[test]

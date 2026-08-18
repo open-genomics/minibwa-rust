@@ -587,16 +587,15 @@ pub(crate) fn update_extra(
     if opt_flag & of::EQX != 0 {
         update_cigar_eqx(r, qseq, tseq);
     }
-    // cs/ds/MD 标签（对应 C 版 mb_update_extra 尾部；Rust 仅实现 MD）
-    let md = if opt_flag & (of::WRITE_DS | of::WRITE_CS | of::WRITE_MD) != 0
-        && opt_flag & (of::WRITE_DS | of::WRITE_CS) == 0
-    {
+    let tag = if opt_flag & (of::WRITE_DS | of::WRITE_CS) != 0 {
+        Some(crate::cs::write_cs_ds(tseq, qseq, r, opt_flag & of::WRITE_DS != 0))
+    } else if opt_flag & of::WRITE_MD != 0 {
         Some(write_md(tseq_full, qseq_full, r))
     } else {
         None
     };
-    if let Some(md) = md {
-        r.p.as_mut().unwrap().cs = Some(md);
+    if let Some(tag) = tag {
+        r.p.as_mut().unwrap().cs = Some(tag);
     }
 }
 

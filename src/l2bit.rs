@@ -63,6 +63,26 @@ impl L2b {
         (self.pac[(i >> 5) as usize] >> ((i & 31) << 1)) as u8 & 3
     }
 
+    /// C(1) → T(3)，对照 `l2b_c2t`。
+    #[inline]
+    pub(crate) fn c2t(b: u8) -> u8 {
+        if b == 1 {
+            3
+        } else {
+            b
+        }
+    }
+
+    /// G(2) → A(0)，对照 `l2b_g2a`。
+    #[inline]
+    pub(crate) fn g2a(b: u8) -> u8 {
+        if b == 2 {
+            0
+        } else {
+            b
+        }
+    }
+
     /// 从 FASTA 导入（对应 `l2b_import`）。seed 用于模糊碱基的随机低 2 bit。
     pub fn import<R: Read>(reader: R, seed: u64) -> Result<Self> {
         let mut l2b = L2b::new();

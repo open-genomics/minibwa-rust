@@ -1,74 +1,85 @@
 #!/bin/bash
-# 对比原版 BWA 与 minibwa-rust 的对齐结果
-# 用法: ./scripts/compare.sh <reference.fa> <reads.fq>
+# 对比 C 版 minibwa 与 minibwa-rust 的 SAM 输出。
+# 用法: ./scripts/compare.sh <reference.fa> <reads1.fq> [reads2.fq]
 #
-# ⚠️  已知问题（接口漂移）：
-#   - 此脚本使用 `bwa`（Heng Li 的原版 BWA），不是 `minibwa`
-#   - Rust CLI 命令名和参数已变化：脚本使用 `align -i prefix.fm`，
-#     但当前 Rust CLI 是 `map <prefix> <reads>`，索引扩展名是 `.l2b`/`.mbw`
-#   - 脚本尚未更新以匹配当前接口
-#   - 在修复前，此脚本不应作为 parity 验证的依据
-#
-# 前置条件: 系统上安装了原版 bwa (bwa mem)
-# 输出: 在当前目录生成 bwa_result.sam 和 minibwa_rust_result.sam，并打印简要统计对比
+# 参考二进制默认 ../minibwa/minibwa（相对仓库根），可用 C_MINIBWA 覆盖。
+# 两端都用当前 CLI：index <fa> <prefix> ； map [-t1] <prefix> <reads...>
 
 set -euo pipefail
 
-echo "WARNING: scripts/compare.sh has known interface drift (see header)."
-echo "         It uses 'bwa' (not 'minibwa') and outdated Rust CLI commands."
-echo "         Results are not a valid parity comparison."
-echo ""
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+C_BIN="${C_MINIBWA:-$REPO_ROOT/../minibwa/minibwa}"
+RUST_BIN="${RUST_BIN:-$REPO_ROOT/target/release/minibwa-rust}"
 
-REFERENCE="${1:?Usage: $0 <reference.fa> <reads.fq>}"
-READS="${2:?Usage: $0 <reference.fa> <reads.fq>}"
+REFERENCE="${1:?Usage: $0 <reference.fa> <reads1.fq> [reads2.fq]}"
+READS1="${2:?Usage: $0 <reference.fa> <reads1.fq> [reads2.fq]}"
+READS2="${3:-}"
 
-BWA_SAM="bwa_result.sam"
-RUST_SAM="minibwa_rust_result.sam"
-INDEX_PREFIX="compare_ref"
-
-echo "=== Step 1: Build BWA index ==="
-if command -v bwa &>/dev/null; then
-    bwa index "$REFERENCE"
-else
-    echo "WARNING: bwa not found in PATH, skipping C BWA comparison"
+if [[ ! -x "$C_BIN" ]]; then
+    echo "ERROR: C minibwa 未找到或不可执行: $C_BIN" >&2
+    echo "       请 clone https://github.com/lh3/minibwa 到 ../minibwa 并 make。" >&2
+    exit 1
 fi
 
-echo "=== Step 2: Build minibwa-rust index ==="
-cargo run --release -- index "$REFERENCE" -o "$INDEX_PREFIX"
+WORKDIR="${COMPARE_WORKDIR:-$(pwd)}"
+C_PREFIX="$WORKDIR/compare_c"
+R_PREFIX="$WORKDIR/compare_r"
+C_SAM="$WORKDIR/minibwa_c.sam"
+R_SAM="$WORKDIR/minibwa_rust.sam"
 
-echo "=== Step 3: Run BWA MEM ==="
-if command -v bwa &>/dev/null; then
-    bwa mem "$REFERENCE" "$READS" > "$BWA_SAM" 2>/dev/null
-    echo "BWA result: $BWA_SAM"
-else
-    echo "Skipped (bwa not found)"
+echo "=== Build minibwa-rust (release) ==="
+(cd "$REPO_ROOT" && cargo build --release)
+if [[ ! -x "$RUST_BIN" ]]; then
+    echo "ERROR: 未找到 $RUST_BIN" >&2
+    exit 1
 fi
 
-echo "=== Step 4: Run minibwa-rust align ==="
-cargo run --release -- align -i "${INDEX_PREFIX}.fm" "$READS" -o "$RUST_SAM"
-echo "minibwa-rust result: $RUST_SAM"
+echo "=== Index (C) ==="
+"$C_BIN" index -t1 "$REFERENCE" "$C_PREFIX"
 
-echo ""
-echo "=== Comparison ==="
+echo "=== Index (Rust) ==="
+"$RUST_BIN" index -t1 "$REFERENCE" "$R_PREFIX"
+
+echo "=== Map (C) ==="
+if [[ -n "$READS2" ]]; then
+    "$C_BIN" map -t1 "$C_PREFIX" "$READS1" "$READS2" > "$C_SAM"
+else
+    "$C_BIN" map -t1 "$C_PREFIX" "$READS1" > "$C_SAM"
+fi
+
+echo "=== Map (Rust) ==="
+if [[ -n "$READS2" ]]; then
+    "$RUST_BIN" map -t1 "$R_PREFIX" "$READS1" "$READS2" > "$R_SAM"
+else
+    "$RUST_BIN" map -t1 "$R_PREFIX" "$READS1" > "$R_SAM"
+fi
 
 count_mapped() {
     local sam_file="$1"
-    local total mapped unmapped
+    local total unmapped mapped
     total=$(grep -cv '^@' "$sam_file" || true)
     unmapped=$(awk '!/^@/ && and($2, 4)' "$sam_file" | wc -l || true)
     mapped=$((total - unmapped))
-    echo "  Total reads: $total"
-    echo "  Mapped:      $mapped"
-    echo "  Unmapped:    $unmapped"
+    echo "  Total records: $total"
+    echo "  Mapped:        $mapped"
+    echo "  Unmapped:      $unmapped"
 }
 
-if [ -f "$BWA_SAM" ]; then
-    echo "--- BWA MEM ---"
-    count_mapped "$BWA_SAM"
+echo ""
+echo "=== Comparison ==="
+echo "--- C minibwa ($C_BIN) ---"
+count_mapped "$C_SAM"
+echo "--- minibwa-rust ---"
+count_mapped "$R_SAM"
+
+c_body=$(grep -cv '^@' "$C_SAM" || true)
+r_body=$(grep -cv '^@' "$R_SAM" || true)
+if [[ "$c_body" == "$r_body" ]]; then
+    echo "Record count: match ($c_body)"
+else
+    echo "Record count: differ (C=$c_body Rust=$r_body)"
 fi
 
-echo "--- minibwa-rust ---"
-count_mapped "$RUST_SAM"
-
 echo ""
-echo "Done. You can manually diff the SAM files for detailed comparison."
+echo "SAM files: $C_SAM  $R_SAM"
+echo "去 header 后可用: diff <(grep -v '^@' $C_SAM) <(grep -v '^@' $R_SAM)"

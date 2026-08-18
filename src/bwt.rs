@@ -432,12 +432,13 @@ impl Bwt {
             // 用预算 kmer 缓存代替逐碱基扩展
             let mut z = 0usize;
             let mut l = 0i64;
-            let mut j = pos;
+            i = pos;
             while l < self.pre_len as i64 {
-                z = z << 2 | q[j as usize] as usize;
-                j -= 1;
+                z = z << 2 | q[i as usize] as usize;
+                i -= 1;
                 l += 1;
             }
+            // 循环结束时 i == pos - pre_len，与 C 版 `for (i = pos; l < pre_len; --i)` 一致
             *p = self.pre.as_ref().unwrap()[z];
         } else {
             p.size = 0;
@@ -757,5 +758,30 @@ mod tests {
             }
             assert_eq!(*slot, p, "kmer {kmer:02b}");
         }
+    }
+
+    /// 对照 C 版 `mb_bwt_back`：cache 命中后游标必须停在 k-mer 左侧，
+    /// SMEM 区间与无缓存路径一致。min_len-1 >= pre_len 才会走缓存。
+    #[test]
+    fn smem_with_cache_matches_without() {
+        let text: Vec<u8> = vec![0, 1, 2, 3, 0, 1, 2, 3, 1, 1, 2, 2, 3, 3, 0, 0];
+        let bwt = build(&text, 2);
+        let q = text.as_slice();
+        let collect = |bwt: &Bwt| {
+            let mut out = Vec::new();
+            let mut p = Sai::default();
+            let mut x = 0i64;
+            while x < q.len() as i64 {
+                x = bwt.smem(q, x, 5, 1, &mut p);
+                if p.size > 0 {
+                    out.push(p);
+                }
+            }
+            out
+        };
+        let no_cache = collect(&bwt);
+        let mut cached = bwt;
+        cached.cache(3);
+        assert_eq!(no_cache, collect(&cached));
     }
 }

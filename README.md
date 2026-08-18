@@ -6,14 +6,16 @@
 
 本项目目标：
 
-- 索引文件与 C 版 minibwa **字节级兼容**（`.l2b` 参考序列 + `.mbw` BWT/采样 SA）
-
-> **Parity 测试前提**：`tests/c_parity.rs` 需要已编译的 C 版 minibwa 二进制
-> （`../minibwa/minibwa`）。该二进制不存在时，parity 测试会跳过并打印提示，
-> **不视为 C parity 已验证**。当前 CI 未构建 C 参考二进制，因此 CI 通过
-> 仅表示 Rust 自身测试通过，不证明与 C 版的字节级一致性。
-- 算法逐模块对照移植，以 C 版输出为基准做一致性验证
+- 索引文件与 C 版 minibwa **字节级兼容**（`.l2b` 参考序列 + `.mbw` BWT/采样 SA；`--meth` 时另有 `.meth.mbw`）
+- 算法逐模块对照移植，以 **已 pin 的 C 版 commit** 输出为基准做一致性验证
 - 纯 Rust 实现（后缀数组构建使用 libsais 的纯 Rust 移植 `libsais-rs`），无 C 依赖
+
+> **C 参考**：`https://github.com/lh3/minibwa`，commit 写在仓库根目录 `C_MINIBWA_COMMIT`。
+> 本地路径 `../minibwa`（相对本仓库根）。构建：`make -C ../minibwa`。
+>
+> **Parity**：`tests/c_parity.rs` 需要 `../minibwa/minibwa` 与 `../minibwa/test/chrM-*.gz`。
+> 本地未准备时打印 `[PARITY SKIP]` 并跳过（**不视为已验证**）。
+> CI 设置 `MINIBWA_REQUIRE_PARITY=1` 并编译 pin 住的 C 二进制，缺依赖即失败。
 
 ## 当前状态
 
@@ -25,12 +27,16 @@
 | M4 | 链化 + hit 处理 + mapQ | ✅ |
 | M5 | ksw2 风格比对 + CIGAR + SAM/PAF（单端一致） | ✅ |
 | M6 | 配对端：insert size 统计、配对、rescue | ✅ |
-| M7 | 自适应参数全量、对比脚本、CI、文档 | 未开始 |
+| M7 | 验证闭环（pin C、CI parity、对照脚本、文档） | ✅ |
+| M8 | 常用 map CLI（`--eqx`/`-b`/`--hic`/`--adap`/`--pe`） | ✅ |
+| M9 | `Idx::load` 启用 10-mer SMEM cache（与 C `mb_bwt_cache(bwt, 10)` 对齐） | ✅ |
+| M10 | `index --meth` 写出与 C 字节一致的 `.meth.mbw` | ✅ |
+| — | 性能：SIMD ksw2 / 读写流水线 | 未做 |
+| — | `map --meth` BS-seq 映射 / 加载 / XR·XG·XM | 未做 |
 
 M6 完成后，本项目已支持配对端比对（`map` 与 `mem` 双命令），并在 chrM 测试
-数据上与 C 版输出逐字节一致：单端、配对端（含 pestat 数据估计、proper pair
-配对、mate rescue、PE mapQ）、`-P` 跳过配对、单文件交错输入、`mem` 的
-MD:Z / n2 / XA 标签。
+数据上与 C 版输出对照：单端 SAM/PAF、配对端（含 pestat、proper pair、mate rescue、
+PE mapQ）、`-P` 跳过配对、`mem` 的 MD:Z / n2 / XA 标签。
 
 ## 构建与使用
 
@@ -39,12 +45,23 @@ cargo build --release
 
 # 建索引（与 C 版 minibwa index 兼容）
 minibwa-rust index ref.fa prefix        # 生成 prefix.l2b + prefix.mbw
+minibwa-rust index --meth ref.fa prefix # 额外生成 prefix.meth.mbw（映射尚未接入）
 
 # 从 .l2b 还原参考序列（调试）
 minibwa-rust getref prefix.l2b
 
 # 比对
 minibwa-rust map prefix read1.fq read2.fq > aln.sam
+```
+
+准备 C 对照：
+
+```bash
+git clone https://github.com/lh3/minibwa.git ../minibwa
+git -C ../minibwa checkout "$(grep -v '^#' C_MINIBWA_COMMIT | tr -d '[:space:]')"
+make -C ../minibwa
+cargo test --test c_parity
+./scripts/compare.sh ref.fa reads.fq
 ```
 
 ## 架构
@@ -63,6 +80,7 @@ reads ──> 两轮 SMEM 种子 ──> 链化 ──> ksw2 比对 ──> SAM/
 | `src/bwt.rs` | bwt.c | BWT Rank/extend/SMEM、采样 SA |
 | `src/index.rs` | index.c | 索引构建流水线 |
 | `src/opt.rs` | options.c | 参数默认值、sr/lr/adap 预设 |
+| `src/cs.rs` | cs.c | cs:Z / ds:Z 标签 |
 | `src/dna.rs` | kommon.c（部分） | 编码表、splitmix64 |
 
 ## 测试
@@ -71,10 +89,10 @@ reads ──> 两轮 SMEM 种子 ──> 链化 ──> ksw2 比对 ──> SAM/
 cargo test
 ```
 
-- M2：索引字节级兼容性验证（`tests/` 集成测试）
-- M5：chrM 单端 SAM/PAF 与 C 版 minibwa 逐字段一致（含 SA:Z、NM/AS/ms/md、cg:Z）
-- M6：chrM 配对端 SAM 与 C 版逐行一致（`tests/c_parity.rs` 的 `pe_sam_parity` /
-  `mem_pe_parity`，覆盖 pestat、配对、rescue、`-P`、`-5`、`-I`、`-S`）
+- M2：索引字节级兼容（`index_parity_*` / `getref_parity`）
+- M10：`index --meth` 的 `.meth.mbw` 字节对照（`index_parity_meth`）
+- M5：chrM 单端 `se_sam_parity` / `se_paf_parity`（去 header 后逐行 / `-f` 逐字节）
+- M6：chrM 配对端 `pe_sam_parity` / `mem_pe_parity`（pestat、配对、rescue、`-P`、`-5`、`-I`、`-S`）
 
 ## 许可
 

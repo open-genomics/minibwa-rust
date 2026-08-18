@@ -213,7 +213,7 @@ mod tests {
         let fa = ">c1\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n\
                   ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n";
         let l2b = L2b::import(fa.as_bytes(), 11).unwrap();
-        let bwt = index::bwt_libsais(&l2b, 4, true, 1).unwrap();
+        let bwt = index::bwt_libsais(&l2b, 4, true, false, 1).unwrap();
         (l2b, bwt)
     }
 
