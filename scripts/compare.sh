@@ -78,6 +78,7 @@ if [[ "$c_body" == "$r_body" ]]; then
     echo "Record count: match ($c_body)"
 else
     echo "Record count: differ (C=$c_body Rust=$r_body)"
+    exit 1
 fi
 
 echo ""

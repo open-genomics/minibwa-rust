@@ -34,13 +34,7 @@ pub fn build(fasta: &str, prefix: &str, seed: u64, sa_bit: u32, threads: usize, 
 }
 
 /// libsais 构建 BWT + 采样 SA（对应 `mb_bwt_libsais`）。
-pub(crate) fn bwt_libsais(
-    l2b: &L2b,
-    sa_bit: u32,
-    both_strand: bool,
-    is_meth: bool,
-    threads: usize,
-) -> Result<Bwt> {
+pub(crate) fn bwt_libsais(l2b: &L2b, sa_bit: u32, both_strand: bool, is_meth: bool, threads: usize) -> Result<Bwt> {
     let copies = if is_meth { 2u64 } else { 1 };
     let strands = if both_strand { 2u64 } else { 1 };
     let len = l2b.tot_len * copies * strands;

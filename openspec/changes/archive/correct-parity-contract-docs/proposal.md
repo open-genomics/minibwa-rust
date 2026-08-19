@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: `Applying`
+- Status: `Archived`
 - Repository: `open-genomics/minibwa-rust`
 - Audit base: `dad6e99b064a93bd017ad819b529686b46413b02`
 - Capability: `reference-parity`
