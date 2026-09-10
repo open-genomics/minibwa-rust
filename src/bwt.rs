@@ -428,7 +428,8 @@ impl Bwt {
     /// 从 pos 向后搜索（对应 `mb_bwt_back`）。返回停止位置 i。
     fn back(&self, q: &[u8], st: i64, pos: i64, min_occ: i64, p: &mut Sai) -> i64 {
         let mut i = pos - 1;
-        if self.pre.is_some() && pos - st >= self.pre_len as i64 {
+        let pre = self.pre.as_ref().filter(|_| pos - st >= self.pre_len as i64);
+        if let Some(pre) = pre {
             // 用预算 kmer 缓存代替逐碱基扩展
             let mut z = 0usize;
             let mut l = 0i64;
@@ -439,7 +440,7 @@ impl Bwt {
                 l += 1;
             }
             // 循环结束时 i == pos - pre_len，与 C 版 `for (i = pos; l < pre_len; --i)` 一致
-            *p = self.pre.as_ref().unwrap()[z];
+            *p = pre[z];
         } else {
             p.size = 0;
         }

@@ -408,11 +408,8 @@ pub fn fmt_sam(
                     let dp_best = r.p.as_ref().map_or(0, |pp| pp.dp_max);
                     let mut n_xa = 0;
                     for (i, q) in hits.iter().enumerate() {
-                        if i != hi
-                            && q.parent as usize == hi
-                            && q.p.is_some()
-                            && q.p.as_ref().unwrap().dp_max as f64 >= opt.out_s as f64 * dp_best as f64
-                        {
+                        let Some(qp) = q.p.as_ref() else { continue };
+                        if i != hi && q.parent as usize == hi && qp.dp_max as f64 >= opt.out_s as f64 * dp_best as f64 {
                             n_xa += 1;
                         }
                     }
@@ -422,10 +419,10 @@ pub fn fmt_sam(
                     if n_xa > 0 && n_xa <= opt.xa_max {
                         out.push_str("\tXA:Z:");
                         for (i, q) in hits.iter().enumerate() {
+                            let Some(qp) = q.p.as_ref() else { continue };
                             if i != hi
                                 && q.parent as usize == hi
-                                && q.p.is_some()
-                                && q.p.as_ref().unwrap().dp_max as f64 >= opt.out_s as f64 * dp_best as f64
+                                && qp.dp_max as f64 >= opt.out_s as f64 * dp_best as f64
                             {
                                 out.push_str(&format!(
                                     "{},{}{},",
@@ -434,7 +431,7 @@ pub fn fmt_sam(
                                     q.ts + 1
                                 ));
                                 write_cigar(out, seq_raw.len() as i32, q, 'S');
-                                out.push_str(&format!(",{};", q.blen - q.mlen + q.p.as_ref().unwrap().n_ambi as i32));
+                                out.push_str(&format!(",{};", q.blen - q.mlen + qp.n_ambi as i32));
                             }
                         }
                     }
