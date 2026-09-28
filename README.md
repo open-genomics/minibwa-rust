@@ -103,6 +103,8 @@ cargo test
 - M10：`index --meth` 的 `.meth.mbw` 字节对照（`index_parity_meth`）
 - M5：chrM 单端 `se_sam_parity` / `se_paf_parity`（去 header 后逐行 / `-f` 逐字节）
 - M6：chrM 配对端 `pe_sam_parity` / `mem_pe_parity`（pestat、配对、rescue、`-P`、`-5`、`-I`、`-S`）
+- M8：常用 CLI 对照（`--eqx`、`-b cs/ds`、`--hic`、`--adap no`：`map_eqx_parity` / `map_cs_parity` / `map_ds_parity` / `map_hic_parity` / `map_adap_no_parity`）
+- 其他：`fastmap_parity`、`chain_only_paf_parity`、`rust_loads_c_index_chrm`（Rust 直接加载 C 版对 chrM 建的索引）
 
 ## 许可
 
