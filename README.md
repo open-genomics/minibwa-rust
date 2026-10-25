@@ -1,8 +1,14 @@
 # minibwa-rust
 
+[![CI](https://github.com/open-genomics/minibwa-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/open-genomics/minibwa-rust/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange)](Cargo.toml)
+
 [minibwa](https://github.com/lh3/minibwa) 的 Rust 重写。minibwa 是 bwa-mem 的继任者：
 用 BWT 索引基因组、查找变长种子（SMEM），再以 minimap2 风格的链化与 DP 比对完成短读映射，
 比 bwa-mem 快 3 倍以上、比 bwa-mem2 快 2 倍，精度相当。
+
+*A pure-Rust port of lh3/minibwa with byte-compatible indexes and CI parity against the pinned C reference.*
 
 本项目目标：
 
@@ -109,3 +115,14 @@ cargo test
 ## 许可
 
 MIT
+
+## 相关项目
+
+- [bwa-rust](https://github.com/open-genomics/bwa-rust)（已归档）— 本项目之前的 BWA-MEM 风格从零实现
+- [fastq-tools](https://github.com/open-genomics/fastq-tools) — C++23 FASTQ 质控工具
+
+<div align="center">
+
+本仓库属于 [**Open Genomics**](https://github.com/open-genomics) · 高性能生物信息学系统软件与中文知识库
+
+</div>
