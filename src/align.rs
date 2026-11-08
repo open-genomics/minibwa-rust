@@ -495,8 +495,9 @@ pub(crate) fn update_extra(
     opt_flag: u64,
     log_gap: bool,
 ) {
-    let (qseq_full, tseq_full) = (qseq, tseq); // MD 需要未截断的完整序列
     let (qshift, tshift) = fix_cigar(r, qseq, tseq);
+    // C 版在 mb_fix_cigar 之后立即把 qseq/tseq 前移到去除前导 I/D 后的起点；
+    // 后续打分、EQX、MD/cs 都必须用平移后的序列，否则标签会整体错位。
     let qseq = &qseq[qshift as usize..];
     let tseq = &tseq[tshift as usize..];
     r.blen = 0;
@@ -590,7 +591,7 @@ pub(crate) fn update_extra(
     let tag = if opt_flag & (of::WRITE_DS | of::WRITE_CS) != 0 {
         Some(crate::cs::write_cs_ds(tseq, qseq, r, opt_flag & of::WRITE_DS != 0))
     } else if opt_flag & of::WRITE_MD != 0 {
-        Some(write_md(tseq_full, qseq_full, r))
+        Some(write_md(tseq, qseq, r))
     } else {
         None
     };
@@ -1065,7 +1066,9 @@ fn align1(opt: &Opt, idx: &Idx, qlen: i32, qseq0: &[Vec<u8>], r: &mut Hit, r2: &
                 }
             }
             if ez.zdropped {
-                let mut j = (i - 1) - 1;
+                // C 版从 j = i - 1 开始回溯（含当前 gap 的前一个锚点）；
+                // 写成 i - 2 会少检查一个锚点，可能把可保留的尾部错误分裂出去。
+                let mut j = i - 1;
                 while j >= 0 {
                     if a[(as1 + j) as usize].tpos <= ts_cur + ez.max_t as i64 {
                         break;
@@ -1230,9 +1233,11 @@ pub fn align_skeleton(opt: &Opt, idx: &Idx, qlen: i32, seq: &[u8], hits: &mut Ve
         as_off += r.cnt;
     }
 
-    let n_regs = hits.len();
+    // 上界不能固定在初始长度：Z-drop 分裂出的尾部 hit 插入到 i+1，
+    // C 版的 for 循环用会随插入增长的 n_regs，新 hit 同样要经过 align1
+    // 做碱基比对，否则尾部 hit 没有 CIGAR/MD，后续过滤会丢结果。
     let mut i = 0usize;
-    while i < n_regs {
+    while i < hits.len() {
         let mut r2 = Hit::default();
         align1(opt, idx, qlen, &qseq0, &mut hits[i], &mut r2, a);
         if r2.cnt > 0 {
@@ -1361,4 +1366,92 @@ fn recal_max_dp(r: &Hit, b2: f64, match_sc: i32, qlen: i32) -> i32 {
     let mut n_mis = r.blen + p.n_ambi as i32 - r.mlen - n_gap;
     n_mis += ((qlen - (r.qe - r.qs)) as f64 / b2 + 0.499) as i32;
     (match_sc as f64 * (r.mlen as f64 - b2 * n_mis as f64 - gap_cost) + 0.499) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn match_matrix(match_score: i8, mismatch: i8) -> [i8; 25] {
+        let mut mat = [mismatch; 25];
+        for i in 0..4 {
+            mat[i * 5 + i] = match_score;
+        }
+        mat
+    }
+
+    fn cigar(op: u32, len: u32) -> u32 {
+        (len << 4) | op
+    }
+
+    /// 前导 deletion：fix_cigar 去掉 2D 并把 r.ts 前移，MD 必须基于平移后的参考。
+    /// 修复前会用未平移的 tseq，产出 `0^TT3` 而不是 `3`。
+    #[test]
+    fn update_extra_md_skips_leading_deletion() {
+        let tseq = [3u8, 3, 0, 1, 2]; // TTACG
+        let qseq = [0u8, 1, 2]; // ACG
+        let mat = match_matrix(2, -3);
+        let mut r = Hit {
+            qs: 0,
+            qe: 3,
+            ts: 0,
+            te: 5,
+            p: Some(Box::new(Extra {
+                cigar: vec![cigar(CIGAR_DEL, 2), cigar(CIGAR_MATCH, 3)],
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        update_extra(&mut r, &qseq, &tseq, &mat, 4, 2, of::WRITE_MD, false);
+
+        assert_eq!(r.p.as_ref().unwrap().cs.as_deref(), Some("MD:Z:3"));
+    }
+
+    /// 前导 insertion：fix_cigar 去掉 2I 并把 r.qs 前移，MD 必须基于平移后的 query。
+    #[test]
+    fn update_extra_md_skips_leading_insertion() {
+        let tseq = [0u8, 1, 2]; // ACG
+        let qseq = [3u8, 3, 0, 1, 2]; // TTACG
+        let mat = match_matrix(2, -3);
+        let mut r = Hit {
+            qs: 0,
+            qe: 5,
+            ts: 0,
+            te: 3,
+            p: Some(Box::new(Extra {
+                cigar: vec![cigar(CIGAR_INS, 2), cigar(CIGAR_MATCH, 3)],
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        update_extra(&mut r, &qseq, &tseq, &mat, 4, 2, of::WRITE_MD, false);
+
+        assert_eq!(r.qs, 2);
+        assert_eq!(r.p.as_ref().unwrap().cs.as_deref(), Some("MD:Z:3"));
+    }
+
+    /// 无前导 indel 时 MD 仍按错配位置编码（回归保护）。
+    #[test]
+    fn update_extra_md_reports_mismatch_without_leading_indel() {
+        let tseq = [0u8, 1, 2]; // ACG
+        let qseq = [0u8, 3, 2]; // ATG
+        let mat = match_matrix(2, -3);
+        let mut r = Hit {
+            qs: 0,
+            qe: 3,
+            ts: 0,
+            te: 3,
+            p: Some(Box::new(Extra {
+                cigar: vec![cigar(CIGAR_MATCH, 3)],
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        update_extra(&mut r, &qseq, &tseq, &mat, 4, 2, of::WRITE_MD, false);
+
+        assert_eq!(r.p.as_ref().unwrap().cs.as_deref(), Some("MD:Z:1C1"));
+    }
 }

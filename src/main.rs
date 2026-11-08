@@ -355,6 +355,8 @@ fn read_batch_pe(
                 frags.push(Fragment { off, cnt: 2 });
             }
             (None, None) => break,
+            // 任一端解析/IO 错误必须传播，不能伪装成记录数不一致而丢弃
+            (Some(Err(e)), _) | (_, Some(Err(e))) => return Err(e.into()),
             _ => {
                 // 一端 EOF 另一端仍有记录
                 eprintln!("[W] query files have different number of records; extra records skipped.");
@@ -479,7 +481,10 @@ fn run_map(
 
     let reader1 = open_fasta(reads1)?;
     let mut it1 = SeqIter::new(reader1);
-    let mut it2 = reads2.map(|p| SeqIter::new(open_fasta(p).unwrap()));
+    let mut it2 = match reads2 {
+        Some(p) => Some(SeqIter::new(open_fasta(p)?)),
+        None => None,
+    };
 
     loop {
         let mut batch = if let Some(it2) = it2.as_mut() {
@@ -975,5 +980,25 @@ fn main() -> Result<()> {
             println!("{VERSION}");
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use minibwa_rust::io::kseq::SeqIter;
+    use std::io::Cursor;
+
+    fn seq_iter(data: &[u8]) -> SeqIter<Box<dyn std::io::Read>> {
+        SeqIter::new(Box::new(Cursor::new(data.to_vec())) as Box<dyn std::io::Read>)
+    }
+
+    #[test]
+    fn read_batch_pe_propagates_read_errors() {
+        // R1 的 qual 比 seq 短：解析错误必须向上传播，不能被当作
+        // “记录数不一致”吞掉并静默输出只剩 SAM header。
+        let mut it1 = seq_iter(b"@a\nACGT\n+\nIII\n");
+        let mut it2 = seq_iter(b"@a\nACGT\n+\nIIII\n");
+        assert!(read_batch_pe(&mut it1, &mut it2, 1_000_000).is_err());
     }
 }

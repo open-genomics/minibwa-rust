@@ -205,13 +205,39 @@ impl L2b {
             bail!("magic 不匹配（期望 L2B\\1）");
         }
         let _dummy = r.u32()?;
-        let n_ctg = r.u64()? as usize;
+        let n_ctg = r.u64()?;
         let tot_len = r.u64()?;
-        let n_ambi = r.u64()? as usize;
-        let n_mask = r.u64()? as usize;
-        let len_name = r.u64()? as usize;
-        let len_comm = r.u64()? as usize;
-        let n_pac = r.u64()? as usize;
+        let n_ambi = r.u64()?;
+        let n_mask = r.u64()?;
+        let len_name = r.u64()?;
+        let len_comm = r.u64()?;
+        let n_pac = r.u64()?;
+
+        // 头部计数全部是文件可控值。分配前按固定记录尺寸把它们与文件
+        // 剩余字节核对，损坏的 .l2b 不能靠声明值驱动巨量分配（旧路径
+        // Vec::with_capacity(1<<60) 直接 capacity overflow panic）。
+        let remaining = r.rest().len() as u64;
+        let needed = n_ctg
+            .checked_mul(8)
+            .and_then(|v| v.checked_add(n_ambi.checked_mul(16)?))
+            .and_then(|v| v.checked_add(n_mask.checked_mul(16)?))
+            .and_then(|v| v.checked_add(n_pac.checked_mul(8)?))
+            .and_then(|v| v.checked_add(len_name))
+            .and_then(|v| v.checked_add(len_comm));
+        if needed.is_none_or(|n| n > remaining) {
+            bail!("头部尺寸与文件剩余字节不一致（需要 {needed:?}，剩余 {remaining}）");
+        }
+        let n_ctg = usize::try_from(n_ctg).context("n_ctg 超出平台大小")?;
+        let n_ambi = usize::try_from(n_ambi).context("n_ambi 超出平台大小")?;
+        let n_mask = usize::try_from(n_mask).context("n_mask 超出平台大小")?;
+        let len_name = usize::try_from(len_name).context("len_name 超出平台大小")?;
+        let len_comm = usize::try_from(len_comm).context("len_comm 超出平台大小")?;
+        let n_pac = usize::try_from(n_pac).context("n_pac 超出平台大小")?;
+
+        // 压缩序列长度由 tot_len 唯一决定；不一致会让 get0 越界或读错位置。
+        if n_pac as u64 != tot_len.div_ceil(32) {
+            bail!("n_pac={n_pac} 与 tot_len={tot_len} 不一致");
+        }
 
         let mut ctg = Vec::with_capacity(n_ctg);
         let mut off = 0u64;
@@ -223,7 +249,7 @@ impl L2b {
                 len,
                 off,
             });
-            off += len;
+            off = off.checked_add(len).context("contig 长度累加溢出")?;
         }
         if off != tot_len {
             bail!("contig 长度之和与 tot_len 不一致");

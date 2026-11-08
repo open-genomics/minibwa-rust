@@ -182,6 +182,18 @@ impl Bwt {
         n
     }
 
+    /// 读取 BWT 数据块内第 `i` 个 u32（每块 4 个 u64 = 8 个 u32，小端）。
+    /// 直接按下标读取，避免为每次 rank 复制整段 BWT。
+    #[inline]
+    fn word32(&self, base: usize, i: usize) -> u32 {
+        let w = self.data[base + (i >> 1)];
+        if i & 1 == 0 {
+            w as u32
+        } else {
+            (w >> 32) as u32
+        }
+    }
+
     /// 四碱基 rank：B[0..k) 中各碱基个数（对应 `mb_bwt_rank1a`）。
     pub fn rank1a(&self, mut k: u64, cnt: &mut [u64; 4]) {
         if k == 0 {
@@ -201,17 +213,16 @@ impl Bwt {
         for (j, cnt_j) in cnt.iter_mut().enumerate() {
             *cnt_j = (self.data[block + j] & CNT_MASK) + ((self.data[block + j] >> CNT_SHIFT) & mask);
         }
-        // 块内 2-bit 数据按 u32 计（小端）
-        let data32 = &self.data[block + 4..];
-        let data32: Vec<u32> = data32.iter().flat_map(|&w| [w as u32, (w >> 32) as u32]).collect();
+        // 块内 2-bit 数据按 u32 计（小端）；只读取当前 128bp 块内的 8 个 u32。
+        let base = block + 4;
         let mut q = if k & 0x7f >= 64 { 4 } else { 0 };
         let end = ((k & 0x7f) >> 4) as usize;
         let mut x = 0u32;
         while q < end {
-            x = x.wrapping_add(self.rank_aux4(data32[q]));
+            x = x.wrapping_add(self.rank_aux4(self.word32(base, q)));
             q += 1;
         }
-        let tmp = data32[q] << ((!k & 0xf) << 1);
+        let tmp = self.word32(base, q) << ((!k & 0xf) << 1);
         x = x.wrapping_add(self.rank_aux4(tmp).wrapping_sub((!k & 0xf) as u32));
         cnt[0] += (x & 0xff) as u64;
         cnt[1] += ((x >> 8) & 0xff) as u64;
@@ -247,26 +258,23 @@ impl Bwt {
             for (j, cntk_j) in cntk.iter_mut().enumerate() {
                 *cntk_j = (self.data[block + j] & CNT_MASK) + ((self.data[block + j] >> CNT_SHIFT) & mask);
             }
-            let data32: Vec<u32> = self.data[block + 4..block + 8]
-                .iter()
-                .flat_map(|&w| [w as u32, (w >> 32) as u32])
-                .collect();
+            let base = block + 4;
             let mut q = if k1 & 0x7f >= 64 { 4 } else { 0 };
             let endk = ((k1 & 0x7f) >> 4) as usize;
             let endl = ((l1 & 0x7f) >> 4) as usize;
             let mut x = 0u32;
             while q < endk {
-                x = x.wrapping_add(self.rank_aux4(data32[q]));
+                x = x.wrapping_add(self.rank_aux4(self.word32(base, q)));
                 q += 1;
             }
             let mut y = x;
-            let tmp = data32[q] << ((!k1 & 0xf) << 1);
+            let tmp = self.word32(base, q) << ((!k1 & 0xf) << 1);
             x = x.wrapping_add(self.rank_aux4(tmp).wrapping_sub((!k1 & 0xf) as u32));
             while q < endl {
-                y = y.wrapping_add(self.rank_aux4(data32[q]));
+                y = y.wrapping_add(self.rank_aux4(self.word32(base, q)));
                 q += 1;
             }
-            let tmp = data32[q] << ((!l1 & 0xf) << 1);
+            let tmp = self.word32(base, q) << ((!l1 & 0xf) << 1);
             y = y.wrapping_add(self.rank_aux4(tmp).wrapping_sub((!l1 & 0xf) as u32));
             *cntl = *cntk;
             cntk[0] += (x & 0xff) as u64;
@@ -398,7 +406,23 @@ impl Bwt {
         bwt.l2[0] = 0;
         bwt.l2[1..].copy_from_slice(&x[1..]);
         bwt.seq_len = bwt.l2[4];
-        let dl = data_len(bwt.seq_len) as usize;
+        if bwt.seq_len == 0 {
+            bail!("seq_len 不能为 0");
+        }
+        if bwt.primary >= bwt.seq_len {
+            bail!("primary={} 越界（seq_len={}）", bwt.primary, bwt.seq_len);
+        }
+        if !bwt.l2.windows(2).all(|w| w[0] <= w[1]) {
+            bail!("L2 计数不是非递减序列: {:?}", bwt.l2);
+        }
+        // 头部 seq_len 是文件可控值：必须先与剩余字节核对，否则损坏/伪造
+        // 的 .mbw 会在读取任何数据前按声明值分配数百 TB（旧路径 abort）。
+        let dl = data_len(bwt.seq_len);
+        let remaining = r.rest().len() as u64;
+        if dl > remaining / 8 {
+            bail!("data 声明长度 {dl} 超过文件剩余字节（{remaining} 字节）");
+        }
+        let dl = dl as usize;
         bwt.data = vec![0u64; dl];
         for v in bwt.data.iter_mut() {
             let b = r.take(8)?;
@@ -406,16 +430,27 @@ impl Bwt {
         }
         let b = r.take(8)?;
         let n_sa = u64::from_le_bytes(b.try_into().unwrap());
-        if bwt.sa_bit != u32::MAX && n_sa > 0 {
+        if bwt.sa_bit != u32::MAX {
+            // sa_bit 也是文件可控值：>=64 的移位在 Rust 中会 panic/回绕，
+            // 且 expected 的计算本身失去意义。
+            if bwt.sa_bit >= 64 {
+                bail!("sa_bit={} 非法（必须 < 64）", bwt.sa_bit);
+            }
             let expected = (bwt.seq_len + (1u64 << bwt.sa_bit)) >> bwt.sa_bit;
+            // sa_bit 有效就必须有完整 SA；n_sa=0 会让 map 阶段 cache(10) 越界。
             if n_sa != expected {
-                bail!("n_sa 与 seq_len/sa_bit 不一致");
+                bail!("n_sa={n_sa} 与 seq_len/sa_bit 推导值 {expected} 不一致");
+            }
+            if n_sa > r.rest().len() as u64 / 8 {
+                bail!("n_sa 声明 {n_sa} 超过文件剩余字节");
             }
             bwt.sa = vec![0u64; n_sa as usize];
             for v in bwt.sa.iter_mut() {
                 let b = r.take(8)?;
                 *v = u64::from_le_bytes(b.try_into().unwrap());
             }
+        } else if n_sa != 0 {
+            bail!("未启用 SA（sa_bit=MAX）但 n_sa={n_sa}");
         }
         if !r.rest().is_empty() {
             bail!("文件末尾有多余数据");

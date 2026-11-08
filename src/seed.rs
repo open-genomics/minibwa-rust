@@ -49,9 +49,12 @@ pub fn seed_intv(bwt: &Bwt, seq: &[u8], min_len: i32, max_sub_occ: i32) -> Vec<S
             continue;
         }
         let sub_min_len = ((en - st) / 2).max(min_len as i64);
+        // C 版第二轮传入父区间右端 en 作为搜索长度：前向扩展必须止于 en，
+        // 否则会越过父区间产生 C 版不存在的子区间。
+        let seq_sub = &seq[..en as usize];
         let mut x = st;
         while {
-            x = bwt.smem(seq, x, sub_min_len, parent_size as i64 + 1, &mut p);
+            x = bwt.smem(seq_sub, x, sub_min_len, parent_size as i64 + 1, &mut p);
             if p.size > parent_size {
                 v.push(p);
             }
@@ -240,6 +243,20 @@ mod tests {
     fn bwt_test_base(i: u64) -> u8 {
         // ACGT 重复
         [0, 1, 2, 3][(i % 4) as usize]
+    }
+
+    #[test]
+    fn seed_intv_pass2_uses_parent_end() {
+        // 参考含重复区：父区间 [0,12) 的第二轮搜索若以整条 read 为界，
+        // 会在 x=7 处越过父区间右端继续前向扩展，产生 C 版没有的 [7,13) 区间。
+        let l2b = L2b::import(b">c1\nCAAAAACAAAAACCAACAACAAAA\n".as_slice(), 11).unwrap();
+        let bwt = index::bwt_libsais(&l2b, 4, true, false, 1).unwrap();
+        let q: Vec<u8> = b"CCAACAACAAAAA".iter().map(|&b| crate::dna::NT4[b as usize]).collect();
+        let v = seed_intv(&bwt, &q, 6, 10);
+        assert!(
+            !v.iter().any(|p| p.info == ((7u64 << 32) | 13) && p.size == 2),
+            "第二轮不应越过父区间右端继续扩展；实际区间: {v:?}"
+        );
     }
 
     #[test]
