@@ -135,7 +135,11 @@ fn ksw_extd2_antidiag(
     let mut last_max_h = 0i32;
     let mut last_st = -1i32;
     let mut last_en = -1i32;
-    let mut p = Vec::new();
+    // 回溯矩阵按反斜角存成扁平缓冲：每行一个 `off`/`off_end` 区间，行首偏移记在
+    // `p_off` 里。逐行 `Vec` 会为每个反斜角各分配一次（长读动辄上千次小分配），
+    // 扁平缓冲只在容量不足时扩容。
+    let mut p: Vec<u8> = Vec::new();
+    let mut p_off: Vec<usize> = Vec::new();
     let mut off = Vec::new();
     let mut off_end = Vec::new();
     let long_thres = if e != e2 {
@@ -338,7 +342,8 @@ fn ksw_extd2_antidiag(
         if with_cigar {
             off.push(st);
             off_end.push(en);
-            p.push(drow);
+            p_off.push(p.len());
+            p.extend_from_slice(&drow);
         }
 
         if approx_max {
@@ -473,6 +478,7 @@ fn ksw_extd2_antidiag(
             backtrack(
                 flags & flag::REV_CIGAR != 0,
                 &p,
+                &p_off,
                 &off,
                 &off_end,
                 tlen as i32 - 1,
@@ -484,6 +490,7 @@ fn ksw_extd2_antidiag(
             backtrack(
                 flags & flag::REV_CIGAR != 0,
                 &p,
+                &p_off,
                 &off,
                 &off_end,
                 ez.mqe_t,
@@ -494,6 +501,7 @@ fn ksw_extd2_antidiag(
             backtrack(
                 flags & flag::REV_CIGAR != 0,
                 &p,
+                &p_off,
                 &off,
                 &off_end,
                 ez.max_t,
@@ -504,7 +512,16 @@ fn ksw_extd2_antidiag(
     }
 }
 
-fn backtrack(is_rev: bool, p: &[Vec<u8>], off: &[i32], off_end: &[i32], i0: i32, j0: i32, cigar: &mut Vec<u32>) {
+fn backtrack(
+    is_rev: bool,
+    p: &[u8],
+    p_off: &[usize],
+    off: &[i32],
+    off_end: &[i32],
+    i0: i32,
+    j0: i32,
+    cigar: &mut Vec<u32>,
+) {
     let (mut i, mut j, mut state) = (i0, j0, 0u8);
     while i >= 0 && j >= 0 {
         let r = (i + j) as usize;
@@ -516,7 +533,7 @@ fn backtrack(is_rev: bool, p: &[Vec<u8>], off: &[i32], off_end: &[i32], i0: i32,
             force_state = 1;
         }
         let tmp = if force_state < 0 {
-            p[r][(i - off[r]) as usize]
+            p[p_off[r] + (i - off[r]) as usize]
         } else {
             0
         };
