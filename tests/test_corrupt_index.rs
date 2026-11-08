@@ -147,3 +147,21 @@ fn l2b_rejects_inconsistent_n_pac() {
     assert!(msg.contains("n_pac"), "expected an n_pac consistency error, got: {msg}");
     let _ = fs::remove_file(path);
 }
+
+#[test]
+fn l2b_load_rejects_comment_stream_shorter_than_contigs() {
+    // 头部 len_comm=0 但 n_ctg=1：旧实现直接 `comms[p_comm]` 索引 panic。
+    let mut buf = l2b_header(1, 4, 0, 0, 2, 0, 1);
+    push_u64(&mut buf, 4); // contig len，总和 = tot_len
+    push_u64(&mut buf, 0); // pac word
+    buf.extend_from_slice(b"A\0");
+    let path = write_temp("l2b-short-comment", &buf);
+
+    let err = match L2b::load(&path) {
+        Ok(_) => panic!("expected L2b::load to reject the forged index"),
+        Err(e) => e,
+    };
+    let msg = format!("{err:#}");
+    assert!(msg.contains("注释串长度小于 contig 数"), "unexpected error: {msg}");
+    let _ = fs::remove_file(path);
+}

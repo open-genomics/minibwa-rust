@@ -535,7 +535,8 @@ fn run_map(
                     std::mem::take(&mut seg_hits[off + 1]),
                 ];
                 let qlen2 = [batch.seqs[off].seq.len() as i32, batch.seqs[off + 1].seq.len() as i32];
-                let qseq2 = [batch.seqs[off].seq.clone(), batch.seqs[off + 1].seq.clone()];
+                // 只借用序列，不逐 fragment 深拷贝两端 read。
+                let qseq2: [&[u8]; 2] = [&batch.seqs[off].seq, &batch.seqs[off + 1].seq];
                 pair(opt, &idx.l2b, &mut nh, &mut hits2, &pes, &qlen2, &qseq2);
                 n_hit[off] = nh[0];
                 n_hit[off + 1] = nh[1];

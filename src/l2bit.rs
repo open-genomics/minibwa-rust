@@ -281,11 +281,15 @@ impl L2b {
         let mut p_name = 0usize;
         let mut p_comm = 0usize;
         for c in ctg.iter_mut() {
-            let end = names[p_name..].iter().position(|&b| b == 0).context("名字串未以 NUL 结尾")?;
+            // 头部声明长度可能小于 contig 数；直接切片/索引会 panic。
+            let name_rest = names.get(p_name..).context("名字串长度小于 contig 数")?;
+            let end = name_rest.iter().position(|&b| b == 0).context("名字串未以 NUL 结尾")?;
             c.name = String::from_utf8(names[p_name..p_name + end].to_vec())?;
             p_name += end + 1;
-            if comms[p_comm] != 0 {
-                let cend = comms[p_comm..].iter().position(|&b| b == 0).context("注释串未以 NUL 结尾")?;
+            let comm_byte = *comms.get(p_comm).context("注释串长度小于 contig 数")?;
+            if comm_byte != 0 {
+                let comm_rest = comms.get(p_comm..).context("注释串长度小于 contig 数")?;
+                let cend = comm_rest.iter().position(|&b| b == 0).context("注释串未以 NUL 结尾")?;
                 c.comm = Some(String::from_utf8(comms[p_comm..p_comm + cend].to_vec())?);
                 p_comm += cend + 1;
             } else {

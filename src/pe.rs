@@ -594,7 +594,7 @@ fn matesw(
     pes: &[Pestat; 4],
     paux0: &PairAux,
     qlen: &[i32; 2],
-    qseq: &[Vec<u8>; 2], // ASCII
+    qseq: &[&[u8]; 2], // ASCII
 ) -> i32 {
     if opt.max_rescue == 0 {
         return 0;
@@ -732,7 +732,7 @@ pub fn pair(
     hit: &mut [Vec<Hit>; 2],
     pes: &[Pestat; 4],
     qlen: &[i32; 2],
-    qseq: &[Vec<u8>; 2], // ASCII
+    qseq: &[&[u8]; 2], // ASCII
 ) {
     const PE_BONUS: i32 = 4;
     if n_hit[0] == 0 && n_hit[1] == 0 {
